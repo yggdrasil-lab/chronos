@@ -1,12 +1,30 @@
 """REST endpoints for habit cues and weekly grid block anchoring."""
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.routers.deps import get_cue_service
-from app.schemas.cues import HabitCueCreate, HabitCueResponse, HabitCueUpdate
+from app.routers.deps import get_cue_service, get_passive_signal_service
+from app.schemas.cues import (
+    HabitCueCreate,
+    HabitCueResponse,
+    HabitCueUpdate,
+    PassiveSignalsResponse,
+)
 from app.services.cue_service import CueService
+from app.services.passive_signal_service import PassiveSignalService
 
 router = APIRouter(prefix="/cues", tags=["Habit Cues"])
+
+
+@router.get("/passive-signals", response_model=PassiveSignalsResponse)
+def get_passive_signals(
+    target_date: date | None = Query(default=None),
+    service: PassiveSignalService = Depends(get_passive_signal_service),
+) -> PassiveSignalsResponse:
+    """Evaluate silent passive habit signals across Eir, Kratos, and Plutus peers."""
+    report = service.get_passive_signals(target_date=target_date)
+    return PassiveSignalsResponse.from_domain(report)
 
 
 @router.get("", response_model=list[HabitCueResponse])

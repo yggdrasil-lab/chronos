@@ -9,6 +9,7 @@ from app.domain.models import (
     Commitment,
     CommitmentSource,
     DaySchedule,
+    DayWorkoutHydration,
     GridBlock,
     GridException,
     NowNextState,
@@ -145,10 +146,52 @@ class CommitmentResponse(BaseModel):
     urgent_quiet_bypass: bool = False
     notes: str | None = None
     has_conflict: bool = False
+    read_only: bool = False
 
     @classmethod
     def from_domain(cls, item: Commitment) -> "CommitmentResponse":
         return cls.model_validate(item)
+
+
+class HydratedWorkoutResponse(BaseModel):
+    """Serialized planned Kratos workout hydrated onto a slice or day header."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str
+    workout_type: str | None = None
+    emphasis: str | None = None
+    notes: str | None = None
+    attached_grid_block_id: int | None = None
+    placement: Literal["grid_block", "day_header"]
+
+
+class CompletedKratosSessionResponse(BaseModel):
+    """Serialized completed Kratos workout session."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    external_ref: str
+    title: str
+    activity_type: str | None = None
+    start_minute: int
+    end_minute: int
+    started_at: str
+    ended_at: str
+
+
+class DayWorkoutHydrationResponse(BaseModel):
+    """Serialized daily Kratos workout hydration summary."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    planned_workout: HydratedWorkoutResponse | None = None
+    completed_sessions: list[CompletedKratosSessionResponse]
+    peer_degraded: bool
+
+    @classmethod
+    def from_domain(cls, hydration: DayWorkoutHydration) -> "DayWorkoutHydrationResponse":
+        return cls.model_validate(hydration)
 
 
 class ResolvedSliceResponse(BaseModel):
@@ -171,6 +214,8 @@ class ResolvedSliceResponse(BaseModel):
     suppressed_tail: bool
     extension_count: int
     notes: str | None = None
+    hydrated_workout: HydratedWorkoutResponse | None = None
+    read_only: bool = False
 
     @classmethod
     def from_domain(cls, item: ResolvedSlice) -> "ResolvedSliceResponse":
@@ -185,6 +230,7 @@ class DayScheduleResponse(BaseModel):
     all_day_commitments: list[CommitmentResponse]
     timed_commitments: list[CommitmentResponse]
     has_conflicts: bool
+    workout_hydration: DayWorkoutHydrationResponse | None = None
 
     @classmethod
     def from_domain(cls, schedule: DaySchedule) -> "DayScheduleResponse":
@@ -198,6 +244,11 @@ class DayScheduleResponse(BaseModel):
                 CommitmentResponse.from_domain(c) for c in schedule.timed_commitments
             ],
             has_conflicts=schedule.has_conflicts,
+            workout_hydration=(
+                DayWorkoutHydrationResponse.from_domain(schedule.workout_hydration)
+                if schedule.workout_hydration is not None
+                else None
+            ),
         )
 
 
@@ -211,6 +262,7 @@ class NowNextResponse(BaseModel):
     upcoming: list[ResolvedSliceResponse]
     open_time_minutes: int | None = None
     is_quiet_hours: bool
+    workout_hydration: DayWorkoutHydrationResponse | None = None
 
     @classmethod
     def from_domain(cls, state: NowNextState) -> "NowNextResponse":
@@ -226,6 +278,11 @@ class NowNextResponse(BaseModel):
             upcoming=[ResolvedSliceResponse.from_domain(s) for s in state.upcoming],
             open_time_minutes=state.open_time_minutes,
             is_quiet_hours=state.is_quiet_hours,
+            workout_hydration=(
+                DayWorkoutHydrationResponse.from_domain(state.workout_hydration)
+                if state.workout_hydration is not None
+                else None
+            ),
         )
 
 

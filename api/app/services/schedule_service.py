@@ -1,7 +1,10 @@
 """Application service layer coordinating validation, persistence, and schedule resolution."""
 
 from datetime import date, datetime
+import logging
 from zoneinfo import ZoneInfo
+
+import httpx
 
 from app.domain.errors import EntityNotFoundError, ScheduleValidationError
 from app.domain.models import (
@@ -13,6 +16,13 @@ from app.domain.models import (
     NowNextState,
     NudgeMode,
 )
+from app.domain.passive_signals import (
+    KratosDaySnapshot,
+    PeerFetchStatus,
+    attach_workout_hydration_to_schedule,
+    build_kratos_completed_commitments,
+    evaluate_workout_hydration,
+)
 from app.domain.schedule_engine import (
     MINUTES_PER_DAY,
     compute_now_next,
@@ -20,6 +30,9 @@ from app.domain.schedule_engine import (
     resolve_day_schedule,
 )
 from app.repositories.protocols import ScheduleRepository
+from app.services.peer_gateways import KratosGateway
+
+logger = logging.getLogger(__name__)
 
 
 def _require_non_empty(value: str, field_name: str) -> str:
@@ -60,9 +73,15 @@ def _validate_commitment_timing(
 class ScheduleService:
     """Use-case coordinator for weekly grid blocks, exceptions, commitments, and schedules."""
 
-    def __init__(self, repo: ScheduleRepository, timezone_name: str = "Pacific/Auckland") -> None:
+    def __init__(
+        self,
+        repo: ScheduleRepository,
+        timezone_name: str = "Pacific/Auckland",
+        kratos_gateway: KratosGateway | None = None,
+    ) -> None:
         self._repo = repo
         self._tz = ZoneInfo(timezone_name)
+        self._kratos_gateway = kratos_gateway
 
     def list_grid_blocks(
         self, *, day_of_week: int | None = None, active_only: bool = False
@@ -285,6 +304,14 @@ class ScheduleService:
         if not self._repo.delete_commitment(commitment_id):
             raise EntityNotFoundError(f"Commitment {commitment_id} not found.")
 
+    def _fetch_kratos_snapshot(self, target_date: date) -> KratosDaySnapshot:
+        assert self._kratos_gateway is not None
+        try:
+            return self._kratos_gateway.fetch_day_snapshot(target_date)
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            logger.warning("Kratos gateway exception during schedule resolution: %s", exc)
+            return KratosDaySnapshot(status=PeerFetchStatus(available=False, error=str(exc)))
+
     def get_day_schedule(self, target_date: date | None = None) -> DaySchedule:
         resolved_date = target_date or datetime.now(self._tz).date()
         grid_blocks = self._repo.list_grid_blocks(
@@ -292,7 +319,30 @@ class ScheduleService:
         )
         exceptions = self._repo.list_exceptions_for_date(resolved_date)
         commitments = self._repo.list_commitments(start_date=resolved_date, end_date=resolved_date)
-        return resolve_day_schedule(resolved_date, grid_blocks, exceptions, commitments)
+        if self._kratos_gateway is None:
+            return resolve_day_schedule(resolved_date, grid_blocks, exceptions, commitments)
+
+        kratos_snapshot = self._fetch_kratos_snapshot(resolved_date)
+        completed_commitments, completed_sessions = build_kratos_completed_commitments(
+            resolved_date,
+            kratos_snapshot,
+            existing_commitments=commitments,
+            tz=self._tz,
+        )
+        schedule = resolve_day_schedule(
+            resolved_date,
+            grid_blocks,
+            exceptions,
+            [*commitments, *completed_commitments],
+        )
+        hydration = evaluate_workout_hydration(
+            resolved_date,
+            kratos_snapshot,
+            schedule,
+            completed_sessions=completed_sessions,
+            tz=self._tz,
+        )
+        return attach_workout_hydration_to_schedule(schedule, hydration)
 
     def get_now_next(
         self, target_date: date | None = None, now_minute: int | None = None
