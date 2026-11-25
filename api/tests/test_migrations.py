@@ -16,6 +16,8 @@ from app.db.orm_models import (
     GridBlockORM,
     GridExceptionORM,
     HabitCueORM,
+    PushDeliveryORM,
+    PushSubscriptionORM,
 )
 
 
@@ -46,6 +48,10 @@ def test_alembic_upgrade_downgrade_roundtrip(tmp_path: Path, monkeypatch) -> Non
             row[1]
             for row in conn.execute("PRAGMA index_list(commitments)").fetchall()
         }
+        push_delivery_indexes = {
+            row[1]
+            for row in conn.execute("PRAGMA index_list(push_deliveries)").fetchall()
+        }
 
     assert {
         "grid_blocks",
@@ -54,11 +60,14 @@ def test_alembic_upgrade_downgrade_roundtrip(tmp_path: Path, monkeypatch) -> Non
         "habit_cues",
         "grid_block_cues",
         "friction_notes",
+        "push_subscriptions",
+        "push_deliveries",
     }.issubset(tables)
-    assert version == ("0002_habit_cues_and_friction",)
+    assert version == ("0003_web_push_and_extend",)
     assert "ix_grid_exceptions_grid_block_id" in exception_indexes
     assert "ix_grid_exceptions_target_date" in exception_indexes
     assert "ix_commitments_date_start" in commitment_indexes
+    assert "ix_push_deliveries_target_date" in push_delivery_indexes
 
     alembic_command.downgrade(cfg, "base")
     with sqlite3.connect(db_file) as conn:
@@ -68,12 +77,17 @@ def test_alembic_upgrade_downgrade_roundtrip(tmp_path: Path, monkeypatch) -> Non
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-    assert "grid_blocks" not in down_tables
-    assert "grid_exceptions" not in down_tables
-    assert "commitments" not in down_tables
-    assert "habit_cues" not in down_tables
-    assert "grid_block_cues" not in down_tables
-    assert "friction_notes" not in down_tables
+    for table_name in (
+        "grid_blocks",
+        "grid_exceptions",
+        "commitments",
+        "habit_cues",
+        "grid_block_cues",
+        "friction_notes",
+        "push_subscriptions",
+        "push_deliveries",
+    ):
+        assert table_name not in down_tables
 
     alembic_command.upgrade(cfg, "head")
 
@@ -87,6 +101,8 @@ def test_alembic_upgrade_downgrade_roundtrip(tmp_path: Path, monkeypatch) -> Non
                 HabitCueORM,
                 GridBlockCueORM,
                 FrictionNoteORM,
+                PushSubscriptionORM,
+                PushDeliveryORM,
             ):
                 session.scalars(select(model).limit(1)).all()
     finally:

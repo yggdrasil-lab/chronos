@@ -1,6 +1,7 @@
 """Pydantic v2 request and response schemas for Chronos REST endpoints."""
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,6 +27,7 @@ class GridBlockCreate(BaseModel):
     end_minute: int
     category: str = "general"
     nudge_mode: NudgeMode = NudgeMode.NONE
+    flexible: bool = False
     active: bool = True
     notes: str | None = None
 
@@ -39,6 +41,7 @@ class GridBlockUpdate(BaseModel):
     end_minute: int | None = None
     category: str | None = None
     nudge_mode: NudgeMode | None = None
+    flexible: bool | None = None
     active: bool | None = None
     notes: str | None = None
 
@@ -55,6 +58,7 @@ class GridBlockResponse(BaseModel):
     end_minute: int
     category: str
     nudge_mode: NudgeMode
+    flexible: bool
     active: bool
     notes: str | None = None
 
@@ -104,7 +108,8 @@ class CommitmentCreate(BaseModel):
     all_day: bool = False
     source: CommitmentSource = CommitmentSource.MANUAL
     external_ref: str | None = None
-    nudge_mode: NudgeMode = NudgeMode.NONE
+    nudge_mode: NudgeMode | None = None
+    urgent_quiet_bypass: bool = False
     notes: str | None = None
 
 
@@ -119,6 +124,7 @@ class CommitmentUpdate(BaseModel):
     source: CommitmentSource | None = None
     external_ref: str | None = None
     nudge_mode: NudgeMode | None = None
+    urgent_quiet_bypass: bool | None = None
     notes: str | None = None
 
 
@@ -136,6 +142,7 @@ class CommitmentResponse(BaseModel):
     source: CommitmentSource
     external_ref: str | None = None
     nudge_mode: NudgeMode
+    urgent_quiet_bypass: bool = False
     notes: str | None = None
     has_conflict: bool = False
 
@@ -158,6 +165,8 @@ class ResolvedSliceResponse(BaseModel):
     category: str | None = None
     source: CommitmentSource | None = None
     nudge_mode: NudgeMode
+    flexible: bool = False
+    urgent_quiet_bypass: bool = False
     has_conflict: bool
     suppressed_tail: bool
     extension_count: int
@@ -218,3 +227,18 @@ class NowNextResponse(BaseModel):
             open_time_minutes=state.open_time_minutes,
             is_quiet_hours=state.is_quiet_hours,
         )
+
+
+class ExtendScheduleRequest(BaseModel):
+    """Request body for extending an active weekly grid block on a target date."""
+
+    target_date: date
+    grid_block_id: int
+    minutes: Literal[15, 30]
+
+
+class ExtendScheduleResponse(BaseModel):
+    """Response holding the extended block exception and any trimmed flexible exceptions."""
+
+    extended_exception: GridExceptionResponse
+    trimmed_exceptions: list[GridExceptionResponse]

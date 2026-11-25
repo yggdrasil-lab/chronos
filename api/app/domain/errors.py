@@ -11,3 +11,7 @@ class ScheduleValidationError(ChronosDomainError):
 
 class EntityNotFoundError(ChronosDomainError):
     """Raised when a requested schedule entity does not exist."""
+
+
+class ScheduleConflictError(ChronosDomainError):
+    """Raised when an operation conflicts with schedule state or extension limits."""
