@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
+from typing import Literal
 
 
 class NudgeMode(str, Enum):
@@ -104,6 +105,41 @@ class Commitment:
     urgent_quiet_bypass: bool = False
     notes: str | None = None
     has_conflict: bool = False
+    read_only: bool = False
+
+
+@dataclass(frozen=True)
+class HydratedWorkout:
+    """Planned Kratos workout attached to a workout grid block or day header."""
+
+    title: str
+    workout_type: str | None = None
+    emphasis: str | None = None
+    notes: str | None = None
+    attached_grid_block_id: int | None = None
+    placement: Literal["grid_block", "day_header"] = "day_header"
+
+
+@dataclass(frozen=True)
+class CompletedKratosSession:
+    """Completed Kratos workout session surfaced in daily hydration."""
+
+    external_ref: str
+    title: str
+    activity_type: str | None
+    start_minute: int
+    end_minute: int
+    started_at: str
+    ended_at: str
+
+
+@dataclass(frozen=True)
+class DayWorkoutHydration:
+    """Planned and completed Kratos workout context for a single calendar date."""
+
+    planned_workout: HydratedWorkout | None = None
+    completed_sessions: tuple[CompletedKratosSession, ...] = ()
+    peer_degraded: bool = False
 
 
 @dataclass(frozen=True)
@@ -125,6 +161,8 @@ class ResolvedSlice:
     suppressed_tail: bool = False
     extension_count: int = 0
     notes: str | None = None
+    hydrated_workout: HydratedWorkout | None = None
+    read_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -135,6 +173,7 @@ class DaySchedule:
     slices: tuple[ResolvedSlice, ...]
     all_day_commitments: tuple[Commitment, ...]
     timed_commitments: tuple[Commitment, ...]
+    workout_hydration: DayWorkoutHydration | None = None
 
     @property
     def has_conflicts(self) -> bool:
@@ -153,6 +192,7 @@ class NowNextState:
     upcoming: tuple[ResolvedSlice, ...]
     open_time_minutes: int | None
     is_quiet_hours: bool
+    workout_hydration: DayWorkoutHydration | None = None
 
 
 @dataclass(frozen=True)

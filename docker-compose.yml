@@ -52,6 +52,10 @@ services:
       - CHRONOS_VAPID_PRIVATE_KEY_FILE=/run/secrets/chronos_vapid_private_key
       - CHRONOS_VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - CHRONOS_VAPID_SUBJECT=${VAPID_SUBJECT}
+      - CHRONOS_EIR_BASE_URL=http://eir-api:8000
+      - CHRONOS_KRATOS_BASE_URL=http://kratos-api:8000
+      - CHRONOS_PLUTUS_BASE_URL=http://plutus-api:8000
+      - CHRONOS_PEER_TIMEOUT_SECONDS=2.5
       - TZ=Pacific/Auckland
     secrets:
       - chronos_db_password

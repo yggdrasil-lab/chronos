@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     vapid_subject: str = ""
     push_scheduler_enabled: bool = True
     push_poll_interval_seconds: int = 30
+    eir_base_url: str = ""
+    kratos_base_url: str = ""
+    plutus_base_url: str = ""
+    peer_timeout_seconds: float = 2.5
 
     model_config = SettingsConfigDict(
         env_prefix="CHRONOS_",
@@ -66,6 +70,9 @@ class Settings(BaseSettings):
         if self.push_poll_interval_seconds <= 0:
             raise ValueError("CHRONOS_PUSH_POLL_INTERVAL_SECONDS must be > 0.")
 
+        if self.peer_timeout_seconds <= 0:
+            raise ValueError("CHRONOS_PEER_TIMEOUT_SECONDS must be > 0.")
+
         if self.environment.strip().lower() == "production":
             self._validate_production_requirements()
 
@@ -89,9 +96,15 @@ class Settings(BaseSettings):
             missing.append("CHRONOS_VAPID_PUBLIC_KEY")
         if not self.vapid_subject.strip():
             missing.append("CHRONOS_VAPID_SUBJECT")
+        if not self.eir_base_url.strip():
+            missing.append("CHRONOS_EIR_BASE_URL")
+        if not self.kratos_base_url.strip():
+            missing.append("CHRONOS_KRATOS_BASE_URL")
+        if not self.plutus_base_url.strip():
+            missing.append("CHRONOS_PLUTUS_BASE_URL")
         if missing:
             raise ValueError(
-                f"Missing required production push configuration: {', '.join(missing)}"
+                f"Missing required production configuration: {', '.join(missing)}"
             )
 
 

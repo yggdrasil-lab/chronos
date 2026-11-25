@@ -1,6 +1,7 @@
 """Pydantic v2 request and response schemas for habit cues and friction reflection."""
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,6 +13,7 @@ from app.domain.models import (
     TagReflectionGroup,
     WeeklyReflection,
 )
+from app.domain.passive_signals import PassiveSignalsReport
 
 
 class FrictionNoteCreate(BaseModel):
@@ -133,3 +135,31 @@ class WeeklyReflectionResponse(BaseModel):
     @classmethod
     def from_domain(cls, reflection: WeeklyReflection) -> "WeeklyReflectionResponse":
         return cls.model_validate(reflection)
+
+
+class PassiveSignalResponse(BaseModel):
+    """Serialized passive signal evaluation state for one canonical rule."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    rule_key: str
+    label: str
+    observed: bool
+    fact_label: str | None = None
+    observed_at: str | None = None
+    source: Literal["eir", "kratos", "plutus"]
+    peer_available: bool
+
+
+class PassiveSignalsResponse(BaseModel):
+    """Serialized passive habit signals response across Eir, Kratos, and Plutus."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    target_date: date
+    signals: dict[str, PassiveSignalResponse]
+    degraded_peers: list[str]
+
+    @classmethod
+    def from_domain(cls, report: PassiveSignalsReport) -> "PassiveSignalsResponse":
+        return cls.model_validate(report)

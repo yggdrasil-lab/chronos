@@ -237,6 +237,20 @@ def test_production_settings_fail_fast_when_secrets_missing(tmp_path: Path) -> N
 
     vapid_file = tmp_path / "chronos_vapid_private_key"
     vapid_file.write_text("synthetic-vapid-key\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="CHRONOS_EIR_BASE_URL"):
+        Settings(
+            environment="production",
+            db_password="",
+            db_password_file=str(secret_file),
+            vapid_private_key="",
+            vapid_private_key_file=str(vapid_file),
+            vapid_public_key="synthetic-public-key",
+            vapid_subject="mailto:chronos@example.invalid",
+        )
+
+    with pytest.raises(ValueError, match="CHRONOS_PEER_TIMEOUT_SECONDS"):
+        Settings(environment="development", peer_timeout_seconds=0)
+
     loaded = Settings(
         environment="production",
         db_host="chronos-db",
@@ -248,11 +262,20 @@ def test_production_settings_fail_fast_when_secrets_missing(tmp_path: Path) -> N
         vapid_private_key_file=str(vapid_file),
         vapid_public_key="synthetic-public-key",
         vapid_subject="mailto:chronos@example.invalid",
+        eir_base_url="http://eir-api:8000",
+        kratos_base_url="http://kratos-api:8000",
+        plutus_base_url="http://plutus-api:8000",
+        peer_timeout_seconds=2.5,
     )
     assert loaded.db_password == "s3cr3t-pass"
     assert loaded.vapid_private_key == "synthetic-vapid-key"
     assert loaded.vapid_configured is True
     assert loaded.database_url == "postgresql+psycopg://chronos:s3cr3t-pass@chronos-db:5432/chronos"
+
+    dev_settings = Settings(environment="development")
+    assert dev_settings.eir_base_url == ""
+    assert dev_settings.kratos_base_url == ""
+    assert dev_settings.plutus_base_url == ""
 
 
 def test_plan_block_extension_trims_flexible_and_enforces_2x_cap() -> None:

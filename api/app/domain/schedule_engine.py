@@ -161,6 +161,7 @@ def resolve_day_schedule(
                 urgent_quiet_bypass=item.urgent_quiet_bypass,
                 has_conflict=item.has_conflict,
                 notes=item.notes,
+                read_only=item.read_only,
             )
         )
 
@@ -212,6 +213,7 @@ def compute_now_next(schedule: DaySchedule, now_minute: int) -> NowNextState:
         upcoming=upcoming,
         open_time_minutes=open_time_minutes,
         is_quiet_hours=is_quiet_hours,
+        workout_hydration=schedule.workout_hydration,
     )
 
 
