@@ -1,7 +1,7 @@
 """Pure immutable domain models for Chronos schedule resolution."""
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 
 
@@ -26,6 +26,15 @@ class SliceKind(str, Enum):
 
     GRID_BLOCK = "grid_block"
     COMMITMENT = "commitment"
+
+
+class FrictionTag(str, Enum):
+    """Categorical friction driver for habit cue and block misses."""
+
+    TIRED = "tired"
+    TRIGGER_MISSED = "trigger_missed"
+    SCHEDULE_OVERRUN = "schedule_overrun"
+    ENVIRONMENT_MISSING = "environment_missing"
 
 
 @dataclass(frozen=True)
@@ -119,3 +128,66 @@ class NowNextState:
     upcoming: tuple[ResolvedSlice, ...]
     open_time_minutes: int | None
     is_quiet_hours: bool
+
+
+@dataclass(frozen=True)
+class FrictionNote:
+    """Captured friction reflection tied optionally to a habit cue or grid block."""
+
+    id: int
+    target_date: date
+    tag: FrictionTag
+    note: str
+    created_at: datetime
+    habit_cue_id: int | None = None
+    grid_block_id: int | None = None
+    cue_title: str | None = None
+    block_title: str | None = None
+    cue_zone_chain: str | None = None
+
+
+@dataclass(frozen=True)
+class HabitCue:
+    """Habit cue entry anchored to zero or more weekly grid blocks."""
+
+    id: int
+    title: str
+    zone_chain: str
+    chain_order: int = 0
+    passive_rule: str | None = None
+    active: bool = True
+    notes: str | None = None
+    grid_block_ids: tuple[int, ...] = ()
+    recent_friction: tuple[FrictionNote, ...] = ()
+
+
+@dataclass(frozen=True)
+class TagReflectionGroup:
+    """Weekly friction summary bucket grouped by FrictionTag."""
+
+    tag: FrictionTag
+    count: int
+    notes: tuple[FrictionNote, ...]
+
+
+@dataclass(frozen=True)
+class CueReflectionGroup:
+    """Weekly friction summary bucket grouped by HabitCue."""
+
+    habit_cue_id: int
+    cue_title: str
+    zone_chain: str
+    count: int
+    notes: tuple[FrictionNote, ...]
+
+
+@dataclass(frozen=True)
+class WeeklyReflection:
+    """7-day friction reflection rollup grouped by tag, cue, and unlinked notes."""
+
+    week_start: date
+    week_end: date
+    total_notes: int
+    by_tag: tuple[TagReflectionGroup, ...]
+    by_cue: tuple[CueReflectionGroup, ...]
+    unlinked_notes: tuple[FrictionNote, ...]

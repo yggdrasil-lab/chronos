@@ -1,9 +1,19 @@
 """Repository Protocol definitions separating persistence from services."""
 
+from collections.abc import Sequence
 from datetime import date
 from typing import Protocol
 
-from app.domain.models import Commitment, CommitmentSource, GridBlock, GridException, NudgeMode
+from app.domain.models import (
+    Commitment,
+    CommitmentSource,
+    FrictionNote,
+    FrictionTag,
+    GridBlock,
+    GridException,
+    HabitCue,
+    NudgeMode,
+)
 
 
 class ScheduleRepository(Protocol):
@@ -112,3 +122,77 @@ class ScheduleRepository(Protocol):
 
     def delete_commitment(self, commitment_id: int) -> bool:
         """Delete a commitment and return True if it existed."""
+
+
+class HabitCueRepository(Protocol):
+    """Persistence contract for Chronos habit cues, block links, and friction notes."""
+
+    def list_cues(
+        self,
+        *,
+        active_only: bool = False,
+        grid_block_id: int | None = None,
+        zone_chain: str | None = None,
+    ) -> list[HabitCue]:
+        """Return habit cues ordered by (zone_chain ASC, chain_order ASC, id ASC)."""
+
+    def get_cue(self, cue_id: int) -> HabitCue | None:
+        """Return a single habit cue by ID, or None if missing."""
+
+    def create_cue(
+        self,
+        *,
+        title: str,
+        zone_chain: str,
+        chain_order: int,
+        passive_rule: str | None,
+        active: bool,
+        notes: str | None,
+        grid_block_ids: Sequence[int],
+    ) -> HabitCue:
+        """Persist and return a new habit cue with anchored grid block links."""
+
+    def update_cue(
+        self,
+        cue_id: int,
+        *,
+        title: str,
+        zone_chain: str,
+        chain_order: int,
+        passive_rule: str | None,
+        active: bool,
+        notes: str | None,
+        grid_block_ids: Sequence[int] | None,
+    ) -> HabitCue | None:
+        """Update an existing habit cue and optionally replace its grid block links."""
+
+    def delete_cue(self, cue_id: int) -> bool:
+        """Delete a habit cue and return True if it existed."""
+
+    def find_missing_grid_block_ids(self, block_ids: Sequence[int]) -> list[int]:
+        """Return any IDs from block_ids that do not exist in grid_blocks."""
+
+    def list_friction_notes(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        habit_cue_id: int | None = None,
+        grid_block_id: int | None = None,
+        limit: int | None = 50,
+    ) -> list[FrictionNote]:
+        """Return friction notes ordered by (target_date DESC, created_at DESC, id DESC)."""
+
+    def create_friction_note(
+        self,
+        *,
+        target_date: date,
+        tag: FrictionTag,
+        note: str,
+        habit_cue_id: int | None,
+        grid_block_id: int | None,
+    ) -> FrictionNote:
+        """Persist and return a new friction note."""
+
+    def delete_friction_note(self, note_id: int) -> bool:
+        """Delete a friction note and return True if it existed."""
