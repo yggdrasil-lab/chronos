@@ -1,0 +1,55 @@
+"""Configuration management for Chronos API."""
+
+from pathlib import Path
+from urllib.parse import quote_plus
+
+from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Runtime configuration loaded from environment variables and Swarm secret files."""
+
+    database_url: str = "postgresql+psycopg://chronos:chronos@localhost:5432/chronos"
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = "chronos"
+    db_user: str = "chronos"
+    db_password: str = ""
+    db_password_file: str = ""
+    environment: str = "development"
+    timezone: str = "Pacific/Auckland"
+
+    model_config = SettingsConfigDict(
+        env_prefix="CHRONOS_",
+        case_sensitive=False,
+    )
+
+    @model_validator(mode="after")
+    def _load_and_validate_secrets(self) -> "Settings":
+        """Load Swarm secret file and enforce fail-fast production database credentials."""
+        if self.db_password_file:
+            secret_path = Path(self.db_password_file)
+            if not secret_path.is_file():
+                raise ValueError(f"Database password file not found: {self.db_password_file}")
+            secret_value = secret_path.read_text(encoding="utf-8").strip()
+            if not secret_value:
+                raise ValueError(f"Database password file is empty: {self.db_password_file}")
+            if not self.db_password:
+                self.db_password = secret_value
+
+        if self.environment.strip().lower() == "production" and not self.db_password.strip():
+            raise ValueError(
+                "CHRONOS_DB_PASSWORD (or CHRONOS_DB_PASSWORD_FILE) is required when CHRONOS_ENVIRONMENT=production."
+            )
+
+        if "database_url" not in self.model_fields_set and self.db_password:
+            self.database_url = (
+                f"postgresql+psycopg://{quote_plus(self.db_user)}:{quote_plus(self.db_password)}"
+                f"@{self.db_host}:{self.db_port}/{self.db_name}"
+            )
+
+        return self
+
+
+settings = Settings()
