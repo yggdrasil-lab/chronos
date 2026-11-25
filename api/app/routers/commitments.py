@@ -37,6 +37,7 @@ def create_commitment(
         source=payload.source,
         external_ref=payload.external_ref,
         nudge_mode=payload.nudge_mode,
+        urgent_quiet_bypass=payload.urgent_quiet_bypass,
         notes=payload.notes,
     )
     return CommitmentResponse.from_domain(item)
@@ -63,6 +64,7 @@ def update_commitment(
         external_ref=payload.external_ref,
         external_ref_provided="external_ref" in fields,
         nudge_mode=payload.nudge_mode,
+        urgent_quiet_bypass=payload.urgent_quiet_bypass,
         notes=payload.notes,
         notes_provided="notes" in fields,
     )

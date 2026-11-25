@@ -13,7 +13,12 @@ from app.domain.models import (
     NowNextState,
     NudgeMode,
 )
-from app.domain.schedule_engine import MINUTES_PER_DAY, compute_now_next, resolve_day_schedule
+from app.domain.schedule_engine import (
+    MINUTES_PER_DAY,
+    compute_now_next,
+    plan_block_extension,
+    resolve_day_schedule,
+)
 from app.repositories.protocols import ScheduleRepository
 
 
@@ -75,8 +80,9 @@ class ScheduleService:
         end_minute: int,
         category: str,
         nudge_mode: NudgeMode,
-        active: bool,
-        notes: str | None,
+        flexible: bool = False,
+        active: bool = True,
+        notes: str | None = None,
     ) -> GridBlock:
         clean_title = _require_non_empty(title, "title")
         clean_category = _require_non_empty(category, "category")
@@ -89,6 +95,7 @@ class ScheduleService:
             end_minute=end_minute,
             category=clean_category,
             nudge_mode=nudge_mode,
+            flexible=flexible,
             active=active,
             notes=notes,
         )
@@ -103,6 +110,7 @@ class ScheduleService:
         end_minute: int | None = None,
         category: str | None = None,
         nudge_mode: NudgeMode | None = None,
+        flexible: bool | None = None,
         active: bool | None = None,
         notes: str | None = None,
         notes_provided: bool = False,
@@ -129,6 +137,7 @@ class ScheduleService:
             end_minute=next_end,
             category=next_category,
             nudge_mode=nudge_mode if nudge_mode is not None else existing.nudge_mode,
+            flexible=flexible if flexible is not None else existing.flexible,
             active=active if active is not None else existing.active,
             notes=notes if notes_provided else existing.notes,
         )
@@ -194,11 +203,17 @@ class ScheduleService:
         all_day: bool,
         source: CommitmentSource,
         external_ref: str | None,
-        nudge_mode: NudgeMode,
-        notes: str | None,
+        nudge_mode: NudgeMode | None,
+        urgent_quiet_bypass: bool = False,
+        notes: str | None = None,
     ) -> Commitment:
         clean_title = _require_non_empty(title, "title")
         _validate_commitment_timing(all_day, start_minute, end_minute)
+        resolved_nudge = (
+            nudge_mode
+            if nudge_mode is not None
+            else (NudgeMode.NONE if all_day else NudgeMode.TWO_STAGE)
+        )
         return self._repo.create_commitment(
             title=clean_title,
             target_date=target_date,
@@ -207,7 +222,8 @@ class ScheduleService:
             all_day=all_day,
             source=source,
             external_ref=external_ref,
-            nudge_mode=nudge_mode,
+            nudge_mode=resolved_nudge,
+            urgent_quiet_bypass=urgent_quiet_bypass,
             notes=notes,
         )
 
@@ -226,6 +242,7 @@ class ScheduleService:
         external_ref: str | None = None,
         external_ref_provided: bool = False,
         nudge_mode: NudgeMode | None = None,
+        urgent_quiet_bypass: bool | None = None,
         notes: str | None = None,
         notes_provided: bool = False,
     ) -> Commitment:
@@ -253,6 +270,11 @@ class ScheduleService:
             source=source if source is not None else existing.source,
             external_ref=external_ref if external_ref_provided else existing.external_ref,
             nudge_mode=nudge_mode if nudge_mode is not None else existing.nudge_mode,
+            urgent_quiet_bypass=(
+                urgent_quiet_bypass
+                if urgent_quiet_bypass is not None
+                else existing.urgent_quiet_bypass
+            ),
             notes=notes if notes_provided else existing.notes,
         )
         if updated is None:
@@ -282,3 +304,21 @@ class ScheduleService:
         )
         schedule = self.get_day_schedule(resolved_date)
         return compute_now_next(schedule, resolved_minute)
+
+    def extend_grid_block(
+        self,
+        *,
+        target_date: date,
+        grid_block_id: int,
+        minutes: int,
+    ) -> tuple[GridException, list[GridException]]:
+        target_block = self._repo.get_grid_block(grid_block_id)
+        if target_block is None:
+            raise EntityNotFoundError(f"GridBlock {grid_block_id} not found.")
+        day_blocks = self._repo.list_grid_blocks(
+            day_of_week=target_date.weekday(), active_only=True
+        )
+        exceptions = self._repo.list_exceptions_for_date(target_date)
+        plan = plan_block_extension(target_block, target_date, minutes, day_blocks, exceptions)
+        saved = self._repo.upsert_exceptions_batch([plan.extended, *plan.trimmed])
+        return saved[0], saved[1:]

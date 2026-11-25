@@ -33,6 +33,7 @@ def create_grid_block(
         end_minute=payload.end_minute,
         category=payload.category,
         nudge_mode=payload.nudge_mode,
+        flexible=payload.flexible,
         active=payload.active,
         notes=payload.notes,
     )
@@ -54,6 +55,7 @@ def update_grid_block(
         end_minute=payload.end_minute,
         category=payload.category,
         nudge_mode=payload.nudge_mode,
+        flexible=payload.flexible,
         active=payload.active,
         notes=payload.notes,
         notes_provided="notes" in payload.model_fields_set,

@@ -4,12 +4,14 @@ from collections.abc import Sequence
 from dataclasses import replace
 from datetime import date
 
-from app.domain.errors import ScheduleValidationError
+from app.domain.errors import ScheduleConflictError, ScheduleValidationError
 from app.domain.models import (
     Commitment,
     DaySchedule,
+    ExtensionPlan,
     GridBlock,
     GridException,
+    GridExceptionDraft,
     NowNextState,
     ResolvedSlice,
     SliceKind,
@@ -19,6 +21,8 @@ MINUTES_PER_DAY = 1440
 MIN_RESUMED_TAIL_MINUTES = 15
 QUIET_HOURS_START_MINUTE = 22 * 60
 QUIET_HOURS_END_MINUTE = 6 * 60 + 30
+MAX_EXTENSION_COUNT = 2
+ALLOWED_EXTEND_MINUTES = (15, 30)
 
 
 def _validate_minute_range(start_minute: int, end_minute: int, context: str) -> None:
@@ -92,6 +96,7 @@ def _carve_block(
             end_minute=seg_end,
             category=block.category,
             nudge_mode=block.nudge_mode,
+            flexible=block.flexible,
             suppressed_tail=(seg_start > effective_start) and ((seg_end - seg_start) < MIN_RESUMED_TAIL_MINUTES),
             extension_count=extension_count,
             notes=notes if notes is not None else block.notes,
@@ -153,6 +158,7 @@ def resolve_day_schedule(
                 end_minute=item.end_minute or 0,
                 source=item.source,
                 nudge_mode=item.nudge_mode,
+                urgent_quiet_bypass=item.urgent_quiet_bypass,
                 has_conflict=item.has_conflict,
                 notes=item.notes,
             )
@@ -207,3 +213,96 @@ def compute_now_next(schedule: DaySchedule, now_minute: int) -> NowNextState:
         open_time_minutes=open_time_minutes,
         is_quiet_hours=is_quiet_hours,
     )
+
+
+def _plan_flexible_trims(
+    target_block_id: int,
+    target_date: date,
+    current_start: int,
+    current_end: int,
+    new_end: int,
+    day_blocks: Sequence[GridBlock],
+    exceptions_by_block: dict[int, GridException],
+) -> list[GridExceptionDraft]:
+    trimmed: list[GridExceptionDraft] = []
+    ordered_blocks = sorted(day_blocks, key=lambda b: (b.start_minute, b.end_minute, b.id))
+    for block in ordered_blocks:
+        if block.id == target_block_id or not block.active or not block.flexible:
+            continue
+        if block.day_of_week != target_date.weekday():
+            continue
+        exc = exceptions_by_block.get(block.id)
+        if exc and exc.skipped:
+            continue
+        later_start = exc.start_minute if exc and exc.start_minute is not None else block.start_minute
+        later_end = exc.end_minute if exc and exc.end_minute is not None else block.end_minute
+        if not (current_start <= later_start < new_end and later_end > current_end):
+            continue
+        trimmed.append(
+            GridExceptionDraft(
+                grid_block_id=block.id,
+                target_date=target_date,
+                skipped=new_end >= later_end,
+                start_minute=(exc.start_minute if exc else None) if new_end >= later_end else new_end,
+                end_minute=exc.end_minute if exc else None,
+                extension_count=exc.extension_count if exc else 0,
+                notes=exc.notes if exc else None,
+            )
+        )
+    return trimmed
+
+
+def plan_block_extension(
+    target_block: GridBlock,
+    target_date: date,
+    minutes: int,
+    day_blocks: Sequence[GridBlock],
+    exceptions: Sequence[GridException],
+) -> ExtensionPlan:
+    """Plan a 15m/30m block extension (2x cap) and trim overlapped flexible blocks."""
+    if minutes not in ALLOWED_EXTEND_MINUTES:
+        raise ScheduleValidationError(f"Extension minutes must be 15 or 30, got {minutes}.")
+    if not target_block.active or target_block.day_of_week != target_date.weekday():
+        raise ScheduleValidationError(
+            f"GridBlock {target_block.id} is not active on {target_date.isoformat()}."
+        )
+
+    exceptions_by_block = {
+        exc.grid_block_id: exc for exc in exceptions if exc.target_date == target_date
+    }
+    existing = exceptions_by_block.get(target_block.id)
+    if existing and existing.skipped:
+        raise ScheduleConflictError(f"GridBlock {target_block.id} is skipped on {target_date.isoformat()}.")
+    current_ext = existing.extension_count if existing else 0
+    if current_ext >= MAX_EXTENSION_COUNT:
+        raise ScheduleConflictError(
+            f"GridBlock {target_block.id} reached maximum extension limit ({MAX_EXTENSION_COUNT}x)."
+        )
+
+    current_start = existing.start_minute if existing and existing.start_minute is not None else target_block.start_minute
+    current_end = existing.end_minute if existing and existing.end_minute is not None else target_block.end_minute
+    if current_end >= MINUTES_PER_DAY:
+        raise ScheduleConflictError(
+            f"GridBlock {target_block.id} already ends at 24:00 and cannot be extended."
+        )
+
+    new_end = min(MINUTES_PER_DAY, current_end + minutes)
+    extended = GridExceptionDraft(
+        grid_block_id=target_block.id,
+        target_date=target_date,
+        skipped=False,
+        start_minute=existing.start_minute if existing else None,
+        end_minute=new_end,
+        extension_count=current_ext + 1,
+        notes=existing.notes if existing else None,
+    )
+    trimmed = _plan_flexible_trims(
+        target_block.id,
+        target_date,
+        current_start,
+        current_end,
+        new_end,
+        day_blocks,
+        exceptions_by_block,
+    )
+    return ExtensionPlan(extended=extended, trimmed=tuple(trimmed))

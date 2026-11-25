@@ -11,8 +11,11 @@ from app.domain.models import (
     FrictionTag,
     GridBlock,
     GridException,
+    GridExceptionDraft,
     HabitCue,
     NudgeMode,
+    PushDelivery,
+    PushSubscription,
 )
 
 
@@ -36,6 +39,7 @@ class ScheduleRepository(Protocol):
         end_minute: int,
         category: str,
         nudge_mode: NudgeMode,
+        flexible: bool,
         active: bool,
         notes: str | None,
     ) -> GridBlock:
@@ -51,6 +55,7 @@ class ScheduleRepository(Protocol):
         end_minute: int,
         category: str,
         nudge_mode: NudgeMode,
+        flexible: bool,
         active: bool,
         notes: str | None,
     ) -> GridBlock | None:
@@ -78,6 +83,9 @@ class ScheduleRepository(Protocol):
     ) -> GridException:
         """Insert or update the exception for (grid_block_id, target_date)."""
 
+    def upsert_exceptions_batch(self, drafts: Sequence[GridExceptionDraft]) -> list[GridException]:
+        """Atomically upsert multiple per-date grid exceptions in one transaction."""
+
     def delete_exception(self, exception_id: int) -> bool:
         """Delete a grid exception and return True if it existed."""
 
@@ -100,6 +108,7 @@ class ScheduleRepository(Protocol):
         source: CommitmentSource,
         external_ref: str | None,
         nudge_mode: NudgeMode,
+        urgent_quiet_bypass: bool,
         notes: str | None,
     ) -> Commitment:
         """Persist and return a new dated commitment."""
@@ -116,6 +125,7 @@ class ScheduleRepository(Protocol):
         source: CommitmentSource,
         external_ref: str | None,
         nudge_mode: NudgeMode,
+        urgent_quiet_bypass: bool,
         notes: str | None,
     ) -> Commitment | None:
         """Update an existing commitment, or return None if missing."""
@@ -196,3 +206,37 @@ class HabitCueRepository(Protocol):
 
     def delete_friction_note(self, note_id: int) -> bool:
         """Delete a friction note and return True if it existed."""
+
+
+class PushRepository(Protocol):
+    """Persistence contract for Web Push subscriptions and delivery deduplication."""
+
+    def upsert_subscription(
+        self,
+        *,
+        endpoint: str,
+        p256dh: str,
+        auth: str,
+        user_agent: str | None,
+    ) -> PushSubscription:
+        """Insert or update a push subscription keyed by endpoint."""
+
+    def delete_subscription_by_endpoint(self, endpoint: str) -> bool:
+        """Delete a push subscription by endpoint and return True if it existed."""
+
+    def list_subscriptions(self) -> list[PushSubscription]:
+        """Return all registered push subscriptions."""
+
+    def list_sent_dedupe_keys(self, target_date: date) -> set[str]:
+        """Return all dedupe keys already recorded for target_date."""
+
+    def record_delivery(
+        self,
+        *,
+        dedupe_key: str,
+        target_date: date,
+        source_kind: str,
+        source_id: str,
+        stage: str,
+    ) -> PushDelivery:
+        """Record a sent push notification for single-fire deduplication."""

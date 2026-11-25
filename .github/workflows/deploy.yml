@@ -23,14 +23,20 @@ jobs:
       - name: Setup Secrets
         env:
           CHRONOS_DB_PASSWORD: ${{ secrets.CHRONOS_DB_PASSWORD }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
         run: |
           if [ -z "${CHRONOS_DB_PASSWORD}" ]; then
             echo "Error: CHRONOS_DB_PASSWORD secret is required" >&2
             exit 1
           fi
+          if [ -z "${VAPID_PRIVATE_KEY}" ]; then
+            echo "Error: VAPID_PRIVATE_KEY secret is required" >&2
+            exit 1
+          fi
           curl -fsSL https://raw.githubusercontent.com/yggdrasil-lab/yggdrasil-os/main/deploy/ensure_secret.sh -o /tmp/ensure_secret.sh
           chmod +x /tmp/ensure_secret.sh
           echo "CHRONOS_DB_PASSWORD_NAME=$(printf '%s' "$CHRONOS_DB_PASSWORD" | /tmp/ensure_secret.sh chronos_db_password)" >> $GITHUB_ENV
+          echo "CHRONOS_VAPID_PRIVATE_KEY_NAME=$(printf '%s' "$VAPID_PRIVATE_KEY" | /tmp/ensure_secret.sh chronos_vapid_private_key)" >> $GITHUB_ENV
 
       - name: Prepare host data directory
         env:
@@ -44,11 +50,17 @@ jobs:
           DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
           REGISTRY_PREFIX: ${{ vars.REGISTRY_PREFIX }}
           CHRONOS_DB_PASSWORD: ${{ secrets.CHRONOS_DB_PASSWORD }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY }}
+          VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
         run: |
           MISSING=""
           [ -z "$DOMAIN_NAME" ] && MISSING="$MISSING DOMAIN_NAME"
           [ -z "$REGISTRY_PREFIX" ] && MISSING="$MISSING REGISTRY_PREFIX"
           [ -z "$CHRONOS_DB_PASSWORD" ] && MISSING="$MISSING CHRONOS_DB_PASSWORD"
+          [ -z "$VAPID_PRIVATE_KEY" ] && MISSING="$MISSING VAPID_PRIVATE_KEY"
+          [ -z "$VAPID_PUBLIC_KEY" ] && MISSING="$MISSING VAPID_PUBLIC_KEY"
+          [ -z "$VAPID_SUBJECT" ] && MISSING="$MISSING VAPID_SUBJECT"
           if [ -n "$MISSING" ]; then
             echo "::error::Deployment halted: missing required configuration:$MISSING" >&2
             exit 1
@@ -59,6 +71,8 @@ jobs:
           REGISTRY_PREFIX: ${{ vars.REGISTRY_PREFIX }}
           DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
           CHRONOS_DB_MOUNT_PATH: ${{ vars.CHRONOS_DB_MOUNT_PATH || '/opt/chronos/data' }}
+          VAPID_PUBLIC_KEY: ${{ vars.VAPID_PUBLIC_KEY }}
+          VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
           IMAGE_TAG: chronos
         run: |
           curl -fsSL https://raw.githubusercontent.com/yggdrasil-lab/yggdrasil-os/main/deploy/deploy.sh -o /tmp/deploy.sh

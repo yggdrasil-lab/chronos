@@ -1,8 +1,9 @@
 """SQLAlchemy 2.0 ORM models for Chronos scheduling tables."""
 
 from datetime import UTC, date, datetime
+import uuid
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -24,6 +25,7 @@ class GridBlockORM(Base):
     end_minute: Mapped[int] = mapped_column(Integer, nullable=False)
     category: Mapped[str] = mapped_column(String(80), nullable=False, default="general")
     nudge_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
+    flexible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -88,6 +90,7 @@ class CommitmentORM(Base):
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
     external_ref: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     nudge_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
+    urgent_quiet_bypass: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -171,3 +174,41 @@ class FrictionNoteORM(Base):
 
     habit_cue: Mapped[HabitCueORM | None] = relationship(back_populates="friction_notes")
     grid_block: Mapped[GridBlockORM | None] = relationship()
+
+
+class PushSubscriptionORM(Base):
+    """Persistent Web Push browser subscription endpoint and encryption keys."""
+
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    p256dh: Mapped[str] = mapped_column(Text, nullable=False)
+    auth: Mapped[str] = mapped_column(Text, nullable=False)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
+class PushDeliveryORM(Base):
+    """Persistent single-fire Web Push delivery log keyed by dedupe_key."""
+
+    __tablename__ = "push_deliveries"
+
+    id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    dedupe_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    target_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

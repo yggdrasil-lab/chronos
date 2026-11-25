@@ -49,9 +49,13 @@ services:
       - CHRONOS_DB_USER=chronos
       - CHRONOS_DB_PASSWORD_FILE=/run/secrets/chronos_db_password
       - CHRONOS_ENVIRONMENT=production
+      - CHRONOS_VAPID_PRIVATE_KEY_FILE=/run/secrets/chronos_vapid_private_key
+      - CHRONOS_VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      - CHRONOS_VAPID_SUBJECT=${VAPID_SUBJECT}
       - TZ=Pacific/Auckland
     secrets:
       - chronos_db_password
+      - chronos_vapid_private_key
     networks:
       - aether-net
     labels:
@@ -87,6 +91,9 @@ secrets:
   chronos_db_password:
     external: true
     name: ${CHRONOS_DB_PASSWORD_NAME}
+  chronos_vapid_private_key:
+    external: true
+    name: ${CHRONOS_VAPID_PRIVATE_KEY_NAME}
 
 networks:
   aether-net:

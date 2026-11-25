@@ -48,6 +48,7 @@ class GridBlock:
     end_minute: int
     category: str
     nudge_mode: NudgeMode = NudgeMode.NONE
+    flexible: bool = False
     active: bool = True
     notes: str | None = None
 
@@ -67,6 +68,27 @@ class GridException:
 
 
 @dataclass(frozen=True)
+class GridExceptionDraft:
+    """Unsaved per-date grid exception produced by pure extension planning."""
+
+    grid_block_id: int
+    target_date: date
+    skipped: bool = False
+    start_minute: int | None = None
+    end_minute: int | None = None
+    extension_count: int = 0
+    notes: str | None = None
+
+
+@dataclass(frozen=True)
+class ExtensionPlan:
+    """Pure extension plan holding the extended block and any trimmed flexible blocks."""
+
+    extended: GridExceptionDraft
+    trimmed: tuple[GridExceptionDraft, ...]
+
+
+@dataclass(frozen=True)
 class Commitment:
     """Dated external or manual commitment that carves weekly blocks."""
 
@@ -79,6 +101,7 @@ class Commitment:
     source: CommitmentSource
     external_ref: str | None = None
     nudge_mode: NudgeMode = NudgeMode.NONE
+    urgent_quiet_bypass: bool = False
     notes: str | None = None
     has_conflict: bool = False
 
@@ -96,6 +119,8 @@ class ResolvedSlice:
     category: str | None = None
     source: CommitmentSource | None = None
     nudge_mode: NudgeMode = NudgeMode.NONE
+    flexible: bool = False
+    urgent_quiet_bypass: bool = False
     has_conflict: bool = False
     suppressed_tail: bool = False
     extension_count: int = 0
@@ -191,3 +216,55 @@ class WeeklyReflection:
     by_tag: tuple[TagReflectionGroup, ...]
     by_cue: tuple[CueReflectionGroup, ...]
     unlinked_notes: tuple[FrictionNote, ...]
+
+
+@dataclass(frozen=True)
+class PushSubscription:
+    """Registered Web Push browser subscription."""
+
+    id: str
+    endpoint: str
+    p256dh: str
+    auth: str
+    user_agent: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class PushDelivery:
+    """Recorded single-fire Web Push delivery receipt."""
+
+    id: str
+    dedupe_key: str
+    target_date: date
+    source_kind: str
+    source_id: str
+    stage: str
+    sent_at: datetime
+
+
+@dataclass(frozen=True)
+class DueNudge:
+    """Pure transition nudge scheduled for immediate Web Push dispatch."""
+
+    dedupe_key: str
+    target_date: date
+    source_kind: str
+    source_id: str
+    stage: str
+    title: str
+    body: str
+    tag: str
+    url: str = "/?tab=now"
+
+    def to_payload(self) -> dict[str, str]:
+        """Serialize push payload expected by Kairos /sw.js."""
+        return {
+            "title": self.title,
+            "body": self.body,
+            "tag": self.tag,
+            "url": self.url,
+            "source_kind": self.source_kind,
+            "stage": self.stage,
+        }

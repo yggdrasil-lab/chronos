@@ -22,6 +22,7 @@ from app.domain.models import (
     FrictionTag,
     GridBlock,
     GridException,
+    GridExceptionDraft,
     HabitCue,
     NudgeMode,
 )
@@ -36,6 +37,7 @@ def _to_grid_block(row: GridBlockORM) -> GridBlock:
         end_minute=row.end_minute,
         category=row.category,
         nudge_mode=NudgeMode(row.nudge_mode),
+        flexible=row.flexible,
         active=row.active,
         notes=row.notes,
     )
@@ -65,6 +67,7 @@ def _to_commitment(row: CommitmentORM) -> Commitment:
         source=CommitmentSource(row.source),
         external_ref=row.external_ref,
         nudge_mode=NudgeMode(row.nudge_mode),
+        urgent_quiet_bypass=row.urgent_quiet_bypass,
         notes=row.notes,
     )
 
@@ -100,6 +103,7 @@ class SqlAlchemyScheduleRepository:
         end_minute: int,
         category: str,
         nudge_mode: NudgeMode,
+        flexible: bool,
         active: bool,
         notes: str | None,
     ) -> GridBlock:
@@ -110,6 +114,7 @@ class SqlAlchemyScheduleRepository:
             end_minute=end_minute,
             category=category,
             nudge_mode=nudge_mode.value,
+            flexible=flexible,
             active=active,
             notes=notes,
         )
@@ -128,6 +133,7 @@ class SqlAlchemyScheduleRepository:
         end_minute: int,
         category: str,
         nudge_mode: NudgeMode,
+        flexible: bool,
         active: bool,
         notes: str | None,
     ) -> GridBlock | None:
@@ -140,6 +146,7 @@ class SqlAlchemyScheduleRepository:
         row.end_minute = end_minute
         row.category = category
         row.nudge_mode = nudge_mode.value
+        row.flexible = flexible
         row.active = active
         row.notes = notes
         self._db.commit()
@@ -177,6 +184,48 @@ class SqlAlchemyScheduleRepository:
         extension_count: int,
         notes: str | None,
     ) -> GridException:
+        row = self._stage_exception_upsert(
+            grid_block_id=grid_block_id,
+            target_date=target_date,
+            skipped=skipped,
+            start_minute=start_minute,
+            end_minute=end_minute,
+            extension_count=extension_count,
+            notes=notes,
+        )
+        self._db.commit()
+        self._db.refresh(row)
+        return _to_grid_exception(row)
+
+    def upsert_exceptions_batch(self, drafts: Sequence[GridExceptionDraft]) -> list[GridException]:
+        rows = [
+            self._stage_exception_upsert(
+                grid_block_id=draft.grid_block_id,
+                target_date=draft.target_date,
+                skipped=draft.skipped,
+                start_minute=draft.start_minute,
+                end_minute=draft.end_minute,
+                extension_count=draft.extension_count,
+                notes=draft.notes,
+            )
+            for draft in drafts
+        ]
+        self._db.commit()
+        for row in rows:
+            self._db.refresh(row)
+        return [_to_grid_exception(row) for row in rows]
+
+    def _stage_exception_upsert(
+        self,
+        *,
+        grid_block_id: int,
+        target_date: date,
+        skipped: bool,
+        start_minute: int | None,
+        end_minute: int | None,
+        extension_count: int,
+        notes: str | None,
+    ) -> GridExceptionORM:
         stmt = select(GridExceptionORM).where(
             GridExceptionORM.grid_block_id == grid_block_id,
             GridExceptionORM.target_date == target_date,
@@ -193,15 +242,13 @@ class SqlAlchemyScheduleRepository:
                 notes=notes,
             )
             self._db.add(row)
-        else:
-            row.skipped = skipped
-            row.start_minute = start_minute
-            row.end_minute = end_minute
-            row.extension_count = extension_count
-            row.notes = notes
-        self._db.commit()
-        self._db.refresh(row)
-        return _to_grid_exception(row)
+            return row
+        row.skipped = skipped
+        row.start_minute = start_minute
+        row.end_minute = end_minute
+        row.extension_count = extension_count
+        row.notes = notes
+        return row
 
     def delete_exception(self, exception_id: int) -> bool:
         row = self._db.get(GridExceptionORM, exception_id)
@@ -241,6 +288,7 @@ class SqlAlchemyScheduleRepository:
         source: CommitmentSource,
         external_ref: str | None,
         nudge_mode: NudgeMode,
+        urgent_quiet_bypass: bool,
         notes: str | None,
     ) -> Commitment:
         row = CommitmentORM(
@@ -252,6 +300,7 @@ class SqlAlchemyScheduleRepository:
             source=source.value,
             external_ref=external_ref,
             nudge_mode=nudge_mode.value,
+            urgent_quiet_bypass=urgent_quiet_bypass,
             notes=notes,
         )
         self._db.add(row)
@@ -271,6 +320,7 @@ class SqlAlchemyScheduleRepository:
         source: CommitmentSource,
         external_ref: str | None,
         nudge_mode: NudgeMode,
+        urgent_quiet_bypass: bool,
         notes: str | None,
     ) -> Commitment | None:
         row = self._db.get(CommitmentORM, commitment_id)
@@ -284,6 +334,7 @@ class SqlAlchemyScheduleRepository:
         row.source = source.value
         row.external_ref = external_ref
         row.nudge_mode = nudge_mode.value
+        row.urgent_quiet_bypass = urgent_quiet_bypass
         row.notes = notes
         self._db.commit()
         self._db.refresh(row)
