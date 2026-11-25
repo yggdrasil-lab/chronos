@@ -1,0 +1,93 @@
+services:
+  chronos-db:
+    image: postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
+    stop_signal: SIGINT
+    stop_grace_period: 60s
+    environment:
+      - POSTGRES_USER=chronos
+      - POSTGRES_DB=chronos
+      - POSTGRES_PASSWORD_FILE=/run/secrets/chronos_db_password
+      - TZ=Pacific/Auckland
+    volumes:
+      - ${CHRONOS_DB_MOUNT_PATH}:/var/lib/postgresql/data
+    secrets:
+      - chronos_db_password
+    networks:
+      - aether-net
+    labels:
+      - "com.docker.compose.project=${STACK_NAME}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chronos -d chronos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      mode: replicated
+      replicas: 1
+      endpoint_mode: dnsrr
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        parallelism: 1
+        order: stop-first
+      restart_policy:
+        condition: any
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  chronos-api:
+    image: ${REGISTRY_PREFIX}chronos-api:${IMAGE_TAG}
+    build: ./api
+    environment:
+      - CHRONOS_DB_HOST=chronos-db
+      - CHRONOS_DB_PORT=5432
+      - CHRONOS_DB_NAME=chronos
+      - CHRONOS_DB_USER=chronos
+      - CHRONOS_DB_PASSWORD_FILE=/run/secrets/chronos_db_password
+      - CHRONOS_ENVIRONMENT=production
+      - TZ=Pacific/Auckland
+    secrets:
+      - chronos_db_password
+    networks:
+      - aether-net
+    labels:
+      - "com.docker.compose.project=${STACK_NAME}"
+    deploy:
+      mode: replicated
+      replicas: 1
+      endpoint_mode: dnsrr
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.chronos-api.rule=Host(`kairos.${DOMAIN_NAME}`) && PathPrefix(`/api`)"
+        - "traefik.http.routers.chronos-api.entrypoints=websecure"
+        - "traefik.http.routers.chronos-api.tls=true"
+        - "traefik.http.routers.chronos-api.tls.certresolver=cloudflare"
+        - "traefik.http.routers.chronos-api.priority=20"
+        - "traefik.http.routers.chronos-api.service=chronos-api"
+        - "traefik.http.routers.chronos-api.middlewares=authentik@docker,chronos-api-strip"
+        - "traefik.http.middlewares.chronos-api-strip.stripprefix.prefixes=/api"
+        - "traefik.http.services.chronos-api.loadbalancer.server.port=8000"
+        - "traefik.docker.network=aether-net"
+
+secrets:
+  chronos_db_password:
+    external: true
+    name: ${CHRONOS_DB_PASSWORD_NAME}
+
+networks:
+  aether-net:
+    external: true
