@@ -1,12 +1,30 @@
 """SQLAlchemy implementation of the Chronos ScheduleRepository protocol."""
 
+from collections import defaultdict
+from collections.abc import Sequence
 from datetime import date
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session, joinedload
 
-from app.db.orm_models import CommitmentORM, GridBlockORM, GridExceptionORM
-from app.domain.models import Commitment, CommitmentSource, GridBlock, GridException, NudgeMode
+from app.db.orm_models import (
+    CommitmentORM,
+    FrictionNoteORM,
+    GridBlockCueORM,
+    GridBlockORM,
+    GridExceptionORM,
+    HabitCueORM,
+)
+from app.domain.models import (
+    Commitment,
+    CommitmentSource,
+    FrictionNote,
+    FrictionTag,
+    GridBlock,
+    GridException,
+    HabitCue,
+    NudgeMode,
+)
 
 
 def _to_grid_block(row: GridBlockORM) -> GridBlock:
@@ -273,6 +291,285 @@ class SqlAlchemyScheduleRepository:
 
     def delete_commitment(self, commitment_id: int) -> bool:
         row = self._db.get(CommitmentORM, commitment_id)
+        if row is None:
+            return False
+        self._db.delete(row)
+        self._db.commit()
+        return True
+
+
+def _to_friction_note(row: FrictionNoteORM) -> FrictionNote:
+    return FrictionNote(
+        id=row.id,
+        target_date=row.target_date,
+        tag=FrictionTag(row.tag),
+        note=row.note,
+        created_at=row.created_at,
+        habit_cue_id=row.habit_cue_id,
+        grid_block_id=row.grid_block_id,
+        cue_title=row.habit_cue.title if row.habit_cue is not None else None,
+        block_title=row.grid_block.title if row.grid_block is not None else None,
+        cue_zone_chain=row.habit_cue.zone_chain if row.habit_cue is not None else None,
+    )
+
+
+def _to_habit_cue(
+    row: HabitCueORM,
+    block_ids: Sequence[int],
+    recent_friction: Sequence[FrictionNote],
+) -> HabitCue:
+    return HabitCue(
+        id=row.id,
+        title=row.title,
+        zone_chain=row.zone_chain,
+        chain_order=row.chain_order,
+        passive_rule=row.passive_rule,
+        active=row.active,
+        notes=row.notes,
+        grid_block_ids=tuple(block_ids),
+        recent_friction=tuple(recent_friction),
+    )
+
+
+class SqlAlchemyHabitCueRepo:
+    """SQLAlchemy-backed repository for habit cues, block anchors, and friction notes."""
+
+    RECENT_FRICTION_LIMIT = 3
+
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def _load_block_links(self, cue_ids: Sequence[int]) -> dict[int, list[int]]:
+        stmt = (
+            select(GridBlockCueORM)
+            .where(GridBlockCueORM.habit_cue_id.in_(cue_ids))
+            .order_by(GridBlockCueORM.grid_block_id)
+        )
+        links: dict[int, list[int]] = defaultdict(list)
+        for link in self._db.scalars(stmt).all():
+            links[link.habit_cue_id].append(link.grid_block_id)
+        return links
+
+    def _load_recent_friction(self, cue_ids: Sequence[int]) -> dict[int, list[FrictionNote]]:
+        ranked = (
+            select(
+                FrictionNoteORM.id.label("note_id"),
+                func.row_number()
+                .over(
+                    partition_by=FrictionNoteORM.habit_cue_id,
+                    order_by=[
+                        FrictionNoteORM.target_date.desc(),
+                        FrictionNoteORM.created_at.desc(),
+                        FrictionNoteORM.id.desc(),
+                    ],
+                )
+                .label("rn"),
+            )
+            .where(FrictionNoteORM.habit_cue_id.in_(cue_ids))
+            .subquery()
+        )
+        stmt = (
+            select(FrictionNoteORM)
+            .join(ranked, FrictionNoteORM.id == ranked.c.note_id)
+            .where(ranked.c.rn <= self.RECENT_FRICTION_LIMIT)
+            .options(
+                joinedload(FrictionNoteORM.habit_cue),
+                joinedload(FrictionNoteORM.grid_block),
+            )
+            .order_by(
+                FrictionNoteORM.target_date.desc(),
+                FrictionNoteORM.created_at.desc(),
+                FrictionNoteORM.id.desc(),
+            )
+        )
+        notes_by_cue: dict[int, list[FrictionNote]] = defaultdict(list)
+        for row in self._db.scalars(stmt).all():
+            if row.habit_cue_id is not None:
+                notes_by_cue[row.habit_cue_id].append(_to_friction_note(row))
+        return notes_by_cue
+
+    def _hydrate_cues(self, rows: Sequence[HabitCueORM]) -> list[HabitCue]:
+        if not rows:
+            return []
+        cue_ids = [row.id for row in rows]
+        links = self._load_block_links(cue_ids)
+        recent = self._load_recent_friction(cue_ids)
+        return [
+            _to_habit_cue(row, links.get(row.id, []), recent.get(row.id, []))
+            for row in rows
+        ]
+
+    def list_cues(
+        self,
+        *,
+        active_only: bool = False,
+        grid_block_id: int | None = None,
+        zone_chain: str | None = None,
+    ) -> list[HabitCue]:
+        stmt = select(HabitCueORM).order_by(
+            HabitCueORM.zone_chain.asc(),
+            HabitCueORM.chain_order.asc(),
+            HabitCueORM.id.asc(),
+        )
+        if active_only:
+            stmt = stmt.where(HabitCueORM.active.is_(True))
+        if zone_chain is not None:
+            stmt = stmt.where(HabitCueORM.zone_chain == zone_chain)
+        if grid_block_id is not None:
+            stmt = stmt.join(
+                GridBlockCueORM, GridBlockCueORM.habit_cue_id == HabitCueORM.id
+            ).where(GridBlockCueORM.grid_block_id == grid_block_id)
+        rows = self._db.scalars(stmt).all()
+        return self._hydrate_cues(rows)
+
+    def get_cue(self, cue_id: int) -> HabitCue | None:
+        row = self._db.get(HabitCueORM, cue_id)
+        if row is None:
+            return None
+        return self._hydrate_cues([row])[0]
+
+    def create_cue(
+        self,
+        *,
+        title: str,
+        zone_chain: str,
+        chain_order: int,
+        passive_rule: str | None,
+        active: bool,
+        notes: str | None,
+        grid_block_ids: Sequence[int],
+    ) -> HabitCue:
+        row = HabitCueORM(
+            title=title,
+            zone_chain=zone_chain,
+            chain_order=chain_order,
+            passive_rule=passive_rule,
+            active=active,
+            notes=notes,
+        )
+        self._db.add(row)
+        self._db.flush()
+        for block_id in grid_block_ids:
+            self._db.add(GridBlockCueORM(grid_block_id=block_id, habit_cue_id=row.id))
+        self._db.commit()
+        self._db.refresh(row)
+        return self._hydrate_cues([row])[0]
+
+    def update_cue(
+        self,
+        cue_id: int,
+        *,
+        title: str,
+        zone_chain: str,
+        chain_order: int,
+        passive_rule: str | None,
+        active: bool,
+        notes: str | None,
+        grid_block_ids: Sequence[int] | None,
+    ) -> HabitCue | None:
+        row = self._db.get(HabitCueORM, cue_id)
+        if row is None:
+            return None
+        row.title = title
+        row.zone_chain = zone_chain
+        row.chain_order = chain_order
+        row.passive_rule = passive_rule
+        row.active = active
+        row.notes = notes
+        if grid_block_ids is not None:
+            self._db.execute(
+                delete(GridBlockCueORM).where(GridBlockCueORM.habit_cue_id == cue_id)
+            )
+            for block_id in grid_block_ids:
+                self._db.add(GridBlockCueORM(grid_block_id=block_id, habit_cue_id=cue_id))
+        self._db.commit()
+        self._db.refresh(row)
+        return self._hydrate_cues([row])[0]
+
+    def delete_cue(self, cue_id: int) -> bool:
+        row = self._db.get(HabitCueORM, cue_id)
+        if row is None:
+            return False
+        self._db.delete(row)
+        self._db.commit()
+        return True
+
+    def find_missing_grid_block_ids(self, block_ids: Sequence[int]) -> list[int]:
+        if not block_ids:
+            return []
+        found = set(
+            self._db.scalars(
+                select(GridBlockORM.id).where(GridBlockORM.id.in_(block_ids))
+            ).all()
+        )
+        return [block_id for block_id in block_ids if block_id not in found]
+
+    def list_friction_notes(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        habit_cue_id: int | None = None,
+        grid_block_id: int | None = None,
+        limit: int | None = 50,
+    ) -> list[FrictionNote]:
+        stmt = (
+            select(FrictionNoteORM)
+            .options(
+                joinedload(FrictionNoteORM.habit_cue),
+                joinedload(FrictionNoteORM.grid_block),
+            )
+            .order_by(
+                FrictionNoteORM.target_date.desc(),
+                FrictionNoteORM.created_at.desc(),
+                FrictionNoteORM.id.desc(),
+            )
+        )
+        if start_date is not None:
+            stmt = stmt.where(FrictionNoteORM.target_date >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(FrictionNoteORM.target_date <= end_date)
+        if habit_cue_id is not None:
+            stmt = stmt.where(FrictionNoteORM.habit_cue_id == habit_cue_id)
+        if grid_block_id is not None:
+            stmt = stmt.where(FrictionNoteORM.grid_block_id == grid_block_id)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return [_to_friction_note(row) for row in self._db.scalars(stmt).all()]
+
+    def create_friction_note(
+        self,
+        *,
+        target_date: date,
+        tag: FrictionTag,
+        note: str,
+        habit_cue_id: int | None,
+        grid_block_id: int | None,
+    ) -> FrictionNote:
+        row = FrictionNoteORM(
+            target_date=target_date,
+            tag=tag.value,
+            note=note,
+            habit_cue_id=habit_cue_id,
+            grid_block_id=grid_block_id,
+        )
+        self._db.add(row)
+        self._db.commit()
+        stmt = (
+            select(FrictionNoteORM)
+            .where(FrictionNoteORM.id == row.id)
+            .options(
+                joinedload(FrictionNoteORM.habit_cue),
+                joinedload(FrictionNoteORM.grid_block),
+            )
+        )
+        loaded = self._db.scalar(stmt)
+        if loaded is None:
+            raise RuntimeError(f"Inserted FrictionNote {row.id} disappeared after commit.")
+        return _to_friction_note(loaded)
+
+    def delete_friction_note(self, note_id: int) -> bool:
+        row = self._db.get(FrictionNoteORM, note_id)
         if row is None:
             return False
         self._db.delete(row)
