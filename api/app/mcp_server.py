@@ -15,9 +15,9 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy.orm import Session
 from starlette.applications import Starlette
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import settings
 from app.db.session import get_db
@@ -46,33 +46,56 @@ SessionOpener = Callable[[], contextlib.AbstractContextManager[Session]]
 KratosGetter = Callable[[], KratosGateway]
 
 
-class McpAuthMiddleware(BaseHTTPMiddleware):
-    """Guard /mcp and /mcp/* with Bearer CHRONOS_MCP_TOKEN; never trust X-authentik-*."""
+def _extract_authorization_header(scope: Scope) -> str:
+    for name, value in scope.get("headers", []):
+        if name.lower() == b"authorization":
+            return value.decode("latin-1")
+    return ""
 
-    async def dispatch(self, request, call_next):
-        path = request.url.path
-        if path == "/mcp" or path.startswith("/mcp/"):
-            expected = settings.mcp_token.strip()
-            if not expected:
-                if settings.environment.strip().lower() != "development":
-                    return JSONResponse(
-                        {"detail": "Chronos MCP token is not configured."},
-                        status_code=503,
-                    )
-                return await call_next(request)
-            scheme, _, candidate = request.headers.get("authorization", "").partition(" ")
-            cleaned = candidate.strip()
-            if (
-                scheme.lower() != "bearer"
-                or not cleaned
-                or not hmac.compare_digest(cleaned, expected)
-            ):
-                return JSONResponse(
-                    {"detail": "Invalid or missing Bearer token."},
-                    status_code=401,
-                    headers={"WWW-Authenticate": "Bearer"},
+
+class McpAuthMiddleware:
+    """Pure ASGI Bearer auth guard for /mcp and /mcp/*; never trusts X-authentik-*."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if path != "/mcp" and not path.startswith("/mcp/"):
+            await self.app(scope, receive, send)
+            return
+
+        expected = settings.mcp_token.strip()
+        if not expected:
+            if settings.environment.strip().lower() != "development":
+                response = JSONResponse(
+                    {"detail": "Chronos MCP token is not configured."},
+                    status_code=503,
                 )
-        return await call_next(request)
+                await response(scope, receive, send)
+                return
+            await self.app(scope, receive, send)
+            return
+
+        scheme, _, candidate = _extract_authorization_header(scope).partition(" ")
+        cleaned = candidate.strip()
+        if (
+            scheme.lower() != "bearer"
+            or not cleaned
+            or not hmac.compare_digest(cleaned, expected)
+        ):
+            response = JSONResponse(
+                {"detail": "Invalid or missing Bearer token."},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            await response(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
 
 
 @contextlib.contextmanager
@@ -266,7 +289,7 @@ class _RebuildableApp:
         self._server = server
         self.app: Starlette | None = None
 
-    def _build(self) -> Starlette:
+    def build(self) -> Starlette:
         return self._server.streamable_http_app(
             streamable_http_path="/mcp",
             stateless_http=True,
@@ -308,7 +331,7 @@ def install_mcp(app: FastAPI) -> None:
 
     @contextlib.asynccontextmanager
     async def lifespan(app_: FastAPI):
-        sub_app = holder._build()
+        sub_app = holder.build()
         holder.app = sub_app
         async with contextlib.AsyncExitStack() as stack:
             if original_lifespan is not None:
