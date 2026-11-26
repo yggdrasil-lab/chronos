@@ -270,6 +270,8 @@ def test_production_settings_fail_fast_when_secrets_missing(tmp_path: Path) -> N
         webhook_secret="synthetic-webhook-secret",
         muninn_api_base="http://muninn:4000/v1",
         muninn_api_key="synthetic-muninn-key",
+        ics_token="synthetic-ics-token",
+        mcp_token="synthetic-mcp-token",
         peer_timeout_seconds=2.5,
     )
     assert loaded.db_password == "s3cr3t-pass"

@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.schedule import CommitmentResponse
+from app.schemas.schedule import CommitmentResponse, CompletedKratosSessionResponse
 
 
 class EmailAttachmentPayload(BaseModel):
@@ -60,3 +60,79 @@ class EmailIngestionResponse(BaseModel):
     status: Literal["created", "duplicate"]
     consumer_ref: str
     commitment: CommitmentResponse
+
+
+class DailySummaryCommitment(BaseModel):
+    """Commitment projection inside the internal daily summary payload."""
+
+    id: int
+    title: str
+    target_date: date
+    start_minute: int | None = None
+    end_minute: int | None = None
+    all_day: bool
+    source: str
+    tentative: bool
+    has_conflict: bool
+    notes: str | None = None
+
+
+class DailySummaryGridException(BaseModel):
+    """Grid exception projection inside the internal daily summary payload."""
+
+    id: int
+    grid_block_id: int
+    target_date: date
+    action: str
+    new_start_minute: int | None = None
+    new_end_minute: int | None = None
+    extension_count: int
+    notes: str | None = None
+
+
+class DailySummaryWorkoutHydration(BaseModel):
+    """Workout hydration summary inside the internal daily summary payload."""
+
+    status: str
+    planned_routine_name: str | None = None
+    planned_day_of_week: str | None = None
+    completed_sessions: list[CompletedKratosSessionResponse] = Field(default_factory=list)
+    attached_grid_block_id: int | None = None
+    error: str | None = None
+
+
+class DailySummaryFrictionNote(BaseModel):
+    """Yesterday's friction note item inside the internal daily summary payload."""
+
+    id: int
+    target_date: date
+    tag: str
+    note: str
+    habit_cue_id: int | None = None
+    grid_block_id: int | None = None
+
+
+class DailySummaryPassiveSignal(BaseModel):
+    """Yesterday's evaluated passive signal linked to an active HabitCue."""
+
+    cue_id: int
+    cue_title: str
+    rule_key: str
+    observed: bool
+    fact_label: str | None = None
+    peer_status: str
+
+
+class DailySummaryResponse(BaseModel):
+    """Internal daily summary consumed by Odin morning copilot over aether-net."""
+
+    date: date
+    yesterday: date
+    commitments: list[DailySummaryCommitment]
+    tentative_count: int
+    conflict_count: int
+    grid_exceptions: list[DailySummaryGridException]
+    workout_hydration: DailySummaryWorkoutHydration | None = None
+    yesterday_friction_notes: list[DailySummaryFrictionNote]
+    yesterday_passive_signals: list[DailySummaryPassiveSignal]
+    degraded_peers: list[str]

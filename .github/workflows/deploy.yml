@@ -26,6 +26,8 @@ jobs:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           CHRONOS_WEBHOOK_SECRET: ${{ secrets.CHRONOS_WEBHOOK_SECRET }}
           MUNINN_MASTER_KEY: ${{ secrets.MUNINN_MASTER_KEY }}
+          CHRONOS_ICS_TOKEN: ${{ secrets.CHRONOS_ICS_TOKEN }}
+          CHRONOS_MCP_TOKEN: ${{ secrets.CHRONOS_MCP_TOKEN }}
         run: |
           if [ -z "${CHRONOS_DB_PASSWORD}" ]; then
             echo "Error: CHRONOS_DB_PASSWORD secret is required" >&2
@@ -43,12 +45,22 @@ jobs:
             echo "Error: MUNINN_MASTER_KEY secret is required" >&2
             exit 1
           fi
+          if [ -z "${CHRONOS_ICS_TOKEN}" ]; then
+            echo "Error: CHRONOS_ICS_TOKEN secret is required" >&2
+            exit 1
+          fi
+          if [ -z "${CHRONOS_MCP_TOKEN}" ]; then
+            echo "Error: CHRONOS_MCP_TOKEN secret is required" >&2
+            exit 1
+          fi
           curl -fsSL https://raw.githubusercontent.com/yggdrasil-lab/yggdrasil-os/main/deploy/ensure_secret.sh -o /tmp/ensure_secret.sh
           chmod +x /tmp/ensure_secret.sh
           echo "CHRONOS_DB_PASSWORD_NAME=$(printf '%s' "$CHRONOS_DB_PASSWORD" | /tmp/ensure_secret.sh chronos_db_password)" >> $GITHUB_ENV
           echo "CHRONOS_VAPID_PRIVATE_KEY_NAME=$(printf '%s' "$VAPID_PRIVATE_KEY" | /tmp/ensure_secret.sh chronos_vapid_private_key)" >> $GITHUB_ENV
           echo "CHRONOS_WEBHOOK_SECRET_NAME=$(printf '%s' "$CHRONOS_WEBHOOK_SECRET" | /tmp/ensure_secret.sh chronos_webhook_secret)" >> $GITHUB_ENV
           echo "CHRONOS_MUNINN_API_KEY_NAME=$(printf '%s' "$MUNINN_MASTER_KEY" | /tmp/ensure_secret.sh chronos_muninn_api_key)" >> $GITHUB_ENV
+          echo "CHRONOS_ICS_TOKEN_NAME=$(printf '%s' "$CHRONOS_ICS_TOKEN" | /tmp/ensure_secret.sh chronos_ics_token)" >> $GITHUB_ENV
+          echo "CHRONOS_MCP_TOKEN_NAME=$(printf '%s' "$CHRONOS_MCP_TOKEN" | /tmp/ensure_secret.sh chronos_mcp_token)" >> $GITHUB_ENV
 
       - name: Prepare host data directory
         env:
@@ -67,6 +79,8 @@ jobs:
           VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
           CHRONOS_WEBHOOK_SECRET: ${{ secrets.CHRONOS_WEBHOOK_SECRET }}
           MUNINN_MASTER_KEY: ${{ secrets.MUNINN_MASTER_KEY }}
+          CHRONOS_ICS_TOKEN: ${{ secrets.CHRONOS_ICS_TOKEN }}
+          CHRONOS_MCP_TOKEN: ${{ secrets.CHRONOS_MCP_TOKEN }}
         run: |
           MISSING=""
           [ -z "$DOMAIN_NAME" ] && MISSING="$MISSING DOMAIN_NAME"
@@ -77,6 +91,8 @@ jobs:
           [ -z "$VAPID_SUBJECT" ] && MISSING="$MISSING VAPID_SUBJECT"
           [ -z "$CHRONOS_WEBHOOK_SECRET" ] && MISSING="$MISSING CHRONOS_WEBHOOK_SECRET"
           [ -z "$MUNINN_MASTER_KEY" ] && MISSING="$MISSING MUNINN_MASTER_KEY"
+          [ -z "$CHRONOS_ICS_TOKEN" ] && MISSING="$MISSING CHRONOS_ICS_TOKEN"
+          [ -z "$CHRONOS_MCP_TOKEN" ] && MISSING="$MISSING CHRONOS_MCP_TOKEN"
           if [ -n "$MISSING" ]; then
             echo "::error::Deployment halted: missing required configuration:$MISSING" >&2
             exit 1

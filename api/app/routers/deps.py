@@ -11,12 +11,14 @@ from app.repositories.sqlalchemy_schedule_repo import (
     SqlAlchemyScheduleRepository,
 )
 from app.services.cue_service import CueService
+from app.services.daily_summary_service import DailySummaryService
 from app.services.email_ingestion import (
     EmailIngestionService,
     MuninnScheduleExtractorAdapter,
     NullScheduleExtractor,
     ScheduleExtractorPort,
 )
+from app.services.ics_service import IcsService
 from app.services.passive_signal_service import PassiveSignalService
 from app.services.peer_gateways import (
     EirGateway,
@@ -137,5 +139,31 @@ def get_email_ingestion_service(
     return EmailIngestionService(
         SqlAlchemyScheduleRepository(db),
         extractor,
+        timezone_name=settings.timezone,
+    )
+
+
+def get_ics_service(
+    db: Session = Depends(get_db),
+    kratos_gateway: KratosGateway = Depends(get_kratos_gateway),
+) -> IcsService:
+    """Construct an IcsService backed by the request's SQLAlchemy session."""
+    return IcsService(
+        SqlAlchemyScheduleRepository(db),
+        timezone_name=settings.timezone,
+        kratos_gateway=kratos_gateway,
+    )
+
+
+def get_daily_summary_service(
+    schedule_service: ScheduleService = Depends(get_schedule_service),
+    cue_service: CueService = Depends(get_cue_service),
+    passive_signal_service: PassiveSignalService = Depends(get_passive_signal_service),
+) -> DailySummaryService:
+    """Construct a DailySummaryService combining schedule, cues, and passive signals."""
+    return DailySummaryService(
+        schedule_service=schedule_service,
+        cue_service=cue_service,
+        passive_signal_service=passive_signal_service,
         timezone_name=settings.timezone,
     )
