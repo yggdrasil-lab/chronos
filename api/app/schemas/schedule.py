@@ -111,6 +111,7 @@ class CommitmentCreate(BaseModel):
     external_ref: str | None = None
     nudge_mode: NudgeMode | None = None
     urgent_quiet_bypass: bool = False
+    tentative: bool = False
     notes: str | None = None
 
 
@@ -126,6 +127,7 @@ class CommitmentUpdate(BaseModel):
     external_ref: str | None = None
     nudge_mode: NudgeMode | None = None
     urgent_quiet_bypass: bool | None = None
+    tentative: bool | None = None
     notes: str | None = None
 
 
@@ -144,6 +146,7 @@ class CommitmentResponse(BaseModel):
     external_ref: str | None = None
     nudge_mode: NudgeMode
     urgent_quiet_bypass: bool = False
+    tentative: bool = False
     notes: str | None = None
     has_conflict: bool = False
     read_only: bool = False
@@ -210,6 +213,7 @@ class ResolvedSliceResponse(BaseModel):
     nudge_mode: NudgeMode
     flexible: bool = False
     urgent_quiet_bypass: bool = False
+    tentative: bool = False
     has_conflict: bool
     suppressed_tail: bool
     extension_count: int

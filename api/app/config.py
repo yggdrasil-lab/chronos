@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     kratos_base_url: str = ""
     plutus_base_url: str = ""
     peer_timeout_seconds: float = 2.5
+    webhook_secret: str = ""
+    webhook_secret_file: str = ""
+    muninn_api_base: str = ""
+    muninn_api_key: str = ""
+    muninn_api_key_file: str = ""
+    muninn_model: str = "app-synthesize"
 
     model_config = SettingsConfigDict(
         env_prefix="CHRONOS_",
@@ -66,6 +72,16 @@ class Settings(BaseSettings):
             vapid_secret = _read_secret_file(self.vapid_private_key_file, "VAPID private key")
             if not self.vapid_private_key:
                 self.vapid_private_key = vapid_secret
+
+        if self.webhook_secret_file:
+            webhook_val = _read_secret_file(self.webhook_secret_file, "Webhook secret")
+            if not self.webhook_secret:
+                self.webhook_secret = webhook_val
+
+        if self.muninn_api_key_file:
+            muninn_val = _read_secret_file(self.muninn_api_key_file, "Muninn API key")
+            if not self.muninn_api_key:
+                self.muninn_api_key = muninn_val
 
         if self.push_poll_interval_seconds <= 0:
             raise ValueError("CHRONOS_PUSH_POLL_INTERVAL_SECONDS must be > 0.")
@@ -102,6 +118,12 @@ class Settings(BaseSettings):
             missing.append("CHRONOS_KRATOS_BASE_URL")
         if not self.plutus_base_url.strip():
             missing.append("CHRONOS_PLUTUS_BASE_URL")
+        if not self.webhook_secret.strip():
+            missing.append("CHRONOS_WEBHOOK_SECRET (or CHRONOS_WEBHOOK_SECRET_FILE)")
+        if not self.muninn_api_base.strip():
+            missing.append("CHRONOS_MUNINN_API_BASE")
+        if not self.muninn_api_key.strip():
+            missing.append("CHRONOS_MUNINN_API_KEY (or CHRONOS_MUNINN_API_KEY_FILE)")
         if missing:
             raise ValueError(
                 f"Missing required production configuration: {', '.join(missing)}"

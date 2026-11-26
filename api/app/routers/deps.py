@@ -11,6 +11,12 @@ from app.repositories.sqlalchemy_schedule_repo import (
     SqlAlchemyScheduleRepository,
 )
 from app.services.cue_service import CueService
+from app.services.email_ingestion import (
+    EmailIngestionService,
+    MuninnScheduleExtractorAdapter,
+    NullScheduleExtractor,
+    ScheduleExtractorPort,
+)
 from app.services.passive_signal_service import PassiveSignalService
 from app.services.peer_gateways import (
     EirGateway,
@@ -100,3 +106,36 @@ def build_push_service(db: Session) -> PushService:
 def get_push_service(db: Session = Depends(get_db)) -> PushService:
     """FastAPI dependency returning a request-scoped PushService."""
     return build_push_service(db)
+
+
+def get_schedule_extractor() -> ScheduleExtractorPort:
+    """Construct the schedule extractor port using Muninn settings or NullScheduleExtractor."""
+    api_base = settings.muninn_api_base.strip()
+    api_key = settings.muninn_api_key.strip()
+    if api_base and api_key:
+        return MuninnScheduleExtractorAdapter(
+            api_base=api_base,
+            api_key=api_key,
+            model=settings.muninn_model,
+            timezone_name=settings.timezone,
+        )
+    if settings.environment.strip().lower() == "development" and not api_base:
+        return NullScheduleExtractor()
+    return MuninnScheduleExtractorAdapter(
+        api_base=api_base,
+        api_key=api_key,
+        model=settings.muninn_model,
+        timezone_name=settings.timezone,
+    )
+
+
+def get_email_ingestion_service(
+    db: Session = Depends(get_db),
+    extractor: ScheduleExtractorPort = Depends(get_schedule_extractor),
+) -> EmailIngestionService:
+    """Construct an EmailIngestionService backed by the request's SQLAlchemy session."""
+    return EmailIngestionService(
+        SqlAlchemyScheduleRepository(db),
+        extractor,
+        timezone_name=settings.timezone,
+    )

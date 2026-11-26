@@ -54,6 +54,7 @@ def _commitment(
     end_minute: int | None = 600,
     all_day: bool = False,
     source: CommitmentSource = CommitmentSource.MANUAL,
+    tentative: bool = False,
 ) -> Commitment:
     return Commitment(
         id=commitment_id,
@@ -63,6 +64,7 @@ def _commitment(
         end_minute=end_minute,
         all_day=all_day,
         source=source,
+        tentative=tentative,
     )
 
 
@@ -265,6 +267,9 @@ def test_production_settings_fail_fast_when_secrets_missing(tmp_path: Path) -> N
         eir_base_url="http://eir-api:8000",
         kratos_base_url="http://kratos-api:8000",
         plutus_base_url="http://plutus-api:8000",
+        webhook_secret="synthetic-webhook-secret",
+        muninn_api_base="http://muninn:4000/v1",
+        muninn_api_key="synthetic-muninn-key",
         peer_timeout_seconds=2.5,
     )
     assert loaded.db_password == "s3cr3t-pass"
@@ -272,10 +277,49 @@ def test_production_settings_fail_fast_when_secrets_missing(tmp_path: Path) -> N
     assert loaded.vapid_configured is True
     assert loaded.database_url == "postgresql+psycopg://chronos:s3cr3t-pass@chronos-db:5432/chronos"
 
+    with pytest.raises(ValueError, match="CHRONOS_WEBHOOK_SECRET"):
+        Settings(
+            environment="production",
+            db_password="",
+            db_password_file=str(secret_file),
+            vapid_private_key="",
+            vapid_private_key_file=str(vapid_file),
+            vapid_public_key="synthetic-public-key",
+            vapid_subject="mailto:chronos@example.invalid",
+            eir_base_url="http://eir-api:8000",
+            kratos_base_url="http://kratos-api:8000",
+            plutus_base_url="http://plutus-api:8000",
+        )
+
     dev_settings = Settings(environment="development")
     assert dev_settings.eir_base_url == ""
     assert dev_settings.kratos_base_url == ""
     assert dev_settings.plutus_base_url == ""
+    assert dev_settings.webhook_secret == ""
+    assert dev_settings.muninn_api_base == ""
+    assert dev_settings.muninn_api_key == ""
+
+
+def test_tentative_commitment_propagates_to_resolved_slice() -> None:
+    tentative = _commitment(
+        50,
+        title="Dentist Checkup",
+        start_minute=600,
+        end_minute=660,
+        source=CommitmentSource.IRIS,
+        tentative=True,
+    )
+    confirmed = _commitment(
+        51,
+        title="Team Sync",
+        start_minute=720,
+        end_minute=750,
+        tentative=False,
+    )
+    schedule = resolve_day_schedule(TARGET_MONDAY, [], [], [tentative, confirmed])
+    by_id = {s.source_id: s for s in schedule.slices}
+    assert by_id[50].tentative is True
+    assert by_id[51].tentative is False
 
 
 def test_plan_block_extension_trims_flexible_and_enforces_2x_cap() -> None:

@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from datetime import date
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.orm_models import (
@@ -68,6 +69,7 @@ def _to_commitment(row: CommitmentORM) -> Commitment:
         external_ref=row.external_ref,
         nudge_mode=NudgeMode(row.nudge_mode),
         urgent_quiet_bypass=row.urgent_quiet_bypass,
+        tentative=row.tentative,
         notes=row.notes,
     )
 
@@ -277,6 +279,16 @@ class SqlAlchemyScheduleRepository:
         row = self._db.get(CommitmentORM, commitment_id)
         return _to_commitment(row) if row is not None else None
 
+    def get_commitment_by_source_external_ref(
+        self, source: CommitmentSource, external_ref: str
+    ) -> Commitment | None:
+        stmt = select(CommitmentORM).where(
+            CommitmentORM.source == source.value,
+            CommitmentORM.external_ref == external_ref,
+        )
+        row = self._db.scalar(stmt)
+        return _to_commitment(row) if row is not None else None
+
     def create_commitment(
         self,
         *,
@@ -289,6 +301,7 @@ class SqlAlchemyScheduleRepository:
         external_ref: str | None,
         nudge_mode: NudgeMode,
         urgent_quiet_bypass: bool,
+        tentative: bool = False,
         notes: str | None,
     ) -> Commitment:
         row = CommitmentORM(
@@ -301,10 +314,15 @@ class SqlAlchemyScheduleRepository:
             external_ref=external_ref,
             nudge_mode=nudge_mode.value,
             urgent_quiet_bypass=urgent_quiet_bypass,
+            tentative=tentative,
             notes=notes,
         )
         self._db.add(row)
-        self._db.commit()
+        try:
+            self._db.commit()
+        except IntegrityError:
+            self._db.rollback()
+            raise
         self._db.refresh(row)
         return _to_commitment(row)
 
@@ -321,6 +339,7 @@ class SqlAlchemyScheduleRepository:
         external_ref: str | None,
         nudge_mode: NudgeMode,
         urgent_quiet_bypass: bool,
+        tentative: bool,
         notes: str | None,
     ) -> Commitment | None:
         row = self._db.get(CommitmentORM, commitment_id)
@@ -335,6 +354,7 @@ class SqlAlchemyScheduleRepository:
         row.external_ref = external_ref
         row.nudge_mode = nudge_mode.value
         row.urgent_quiet_bypass = urgent_quiet_bypass
+        row.tentative = tentative
         row.notes = notes
         self._db.commit()
         self._db.refresh(row)

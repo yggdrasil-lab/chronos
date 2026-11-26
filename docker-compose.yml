@@ -56,10 +56,16 @@ services:
       - CHRONOS_KRATOS_BASE_URL=http://kratos-api:8000
       - CHRONOS_PLUTUS_BASE_URL=http://plutus-api:8000
       - CHRONOS_PEER_TIMEOUT_SECONDS=2.5
+      - CHRONOS_WEBHOOK_SECRET_FILE=/run/secrets/chronos_webhook_secret
+      - CHRONOS_MUNINN_API_BASE=http://muninn:4000/v1
+      - CHRONOS_MUNINN_MODEL=app-synthesize
+      - CHRONOS_MUNINN_API_KEY_FILE=/run/secrets/chronos_muninn_api_key
       - TZ=Pacific/Auckland
     secrets:
       - chronos_db_password
       - chronos_vapid_private_key
+      - chronos_webhook_secret
+      - chronos_muninn_api_key
     networks:
       - aether-net
     labels:
@@ -98,6 +104,12 @@ secrets:
   chronos_vapid_private_key:
     external: true
     name: ${CHRONOS_VAPID_PRIVATE_KEY_NAME}
+  chronos_webhook_secret:
+    external: true
+    name: ${CHRONOS_WEBHOOK_SECRET_NAME}
+  chronos_muninn_api_key:
+    external: true
+    name: ${CHRONOS_MUNINN_API_KEY_NAME}
 
 networks:
   aether-net:

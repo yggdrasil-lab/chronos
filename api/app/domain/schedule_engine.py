@@ -159,6 +159,7 @@ def resolve_day_schedule(
                 source=item.source,
                 nudge_mode=item.nudge_mode,
                 urgent_quiet_bypass=item.urgent_quiet_bypass,
+                tentative=item.tentative,
                 has_conflict=item.has_conflict,
                 notes=item.notes,
                 read_only=item.read_only,
