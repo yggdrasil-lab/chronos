@@ -97,6 +97,11 @@ class ScheduleRepository(Protocol):
     def get_commitment(self, commitment_id: int) -> Commitment | None:
         """Return a single commitment by ID, or None if missing."""
 
+    def get_commitment_by_source_external_ref(
+        self, source: CommitmentSource, external_ref: str
+    ) -> Commitment | None:
+        """Return a single commitment matching (source, external_ref), or None if missing."""
+
     def create_commitment(
         self,
         *,
@@ -109,6 +114,7 @@ class ScheduleRepository(Protocol):
         external_ref: str | None,
         nudge_mode: NudgeMode,
         urgent_quiet_bypass: bool,
+        tentative: bool = False,
         notes: str | None,
     ) -> Commitment:
         """Persist and return a new dated commitment."""
@@ -126,6 +132,7 @@ class ScheduleRepository(Protocol):
         external_ref: str | None,
         nudge_mode: NudgeMode,
         urgent_quiet_bypass: bool,
+        tentative: bool,
         notes: str | None,
     ) -> Commitment | None:
         """Update an existing commitment, or return None if missing."""

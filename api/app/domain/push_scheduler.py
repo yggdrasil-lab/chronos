@@ -73,7 +73,7 @@ def evaluate_due_nudges(
     due: list[DueNudge] = []
 
     for item in schedule.slices:
-        if item.suppressed_tail:
+        if item.suppressed_tail or item.tentative:
             continue
         if quiet_hours and not (item.kind == SliceKind.COMMITMENT and item.urgent_quiet_bypass):
             continue

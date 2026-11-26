@@ -3,6 +3,7 @@
 from datetime import UTC, date, datetime
 import uuid
 
+import sqlalchemy as sa
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -79,6 +80,12 @@ class CommitmentORM(Base):
     __tablename__ = "commitments"
     __table_args__ = (
         Index("ix_commitments_date_start", "target_date", "start_minute"),
+        Index(
+            "uq_commitments_source_external_ref",
+            "source",
+            "external_ref",
+            unique=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -91,6 +98,9 @@ class CommitmentORM(Base):
     external_ref: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     nudge_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
     urgent_quiet_bypass: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    tentative: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(

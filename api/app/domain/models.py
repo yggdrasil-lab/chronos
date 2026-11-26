@@ -103,6 +103,7 @@ class Commitment:
     external_ref: str | None = None
     nudge_mode: NudgeMode = NudgeMode.NONE
     urgent_quiet_bypass: bool = False
+    tentative: bool = False
     notes: str | None = None
     has_conflict: bool = False
     read_only: bool = False
@@ -157,6 +158,7 @@ class ResolvedSlice:
     nudge_mode: NudgeMode = NudgeMode.NONE
     flexible: bool = False
     urgent_quiet_bypass: bool = False
+    tentative: bool = False
     has_conflict: bool = False
     suppressed_tail: bool = False
     extension_count: int = 0

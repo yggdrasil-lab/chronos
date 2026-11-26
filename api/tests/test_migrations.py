@@ -63,10 +63,11 @@ def test_alembic_upgrade_downgrade_roundtrip(tmp_path: Path, monkeypatch) -> Non
         "push_subscriptions",
         "push_deliveries",
     }.issubset(tables)
-    assert version == ("0003_web_push_and_extend",)
+    assert version == ("0004_tentative_commitments",)
     assert "ix_grid_exceptions_grid_block_id" in exception_indexes
     assert "ix_grid_exceptions_target_date" in exception_indexes
     assert "ix_commitments_date_start" in commitment_indexes
+    assert "uq_commitments_source_external_ref" in commitment_indexes
     assert "ix_push_deliveries_target_date" in push_delivery_indexes
 
     alembic_command.downgrade(cfg, "base")

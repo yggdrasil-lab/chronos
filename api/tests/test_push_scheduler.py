@@ -45,6 +45,7 @@ def _commitment(
     all_day: bool = False,
     nudge_mode: NudgeMode = NudgeMode.TWO_STAGE,
     urgent_quiet_bypass: bool = False,
+    tentative: bool = False,
 ) -> Commitment:
     return Commitment(
         id=commitment_id,
@@ -56,6 +57,7 @@ def _commitment(
         source=CommitmentSource.MANUAL,
         nudge_mode=nudge_mode,
         urgent_quiet_bypass=urgent_quiet_bypass,
+        tentative=tentative,
     )
 
 
@@ -150,3 +152,32 @@ def test_suppressed_tail_skipped_and_invalid_minute_rejected() -> None:
 
     with pytest.raises(ScheduleValidationError):
         evaluate_due_nudges(schedule, 1441, set())
+
+
+def test_tentative_commitment_never_triggers_push_nudges_until_confirmed() -> None:
+    tentative = _commitment(
+        20,
+        title="Dentist Checkup",
+        start_minute=600,
+        end_minute=660,
+        nudge_mode=NudgeMode.TWO_STAGE,
+        urgent_quiet_bypass=True,
+        tentative=True,
+    )
+    confirmed = _commitment(
+        20,
+        title="Dentist Checkup",
+        start_minute=600,
+        end_minute=660,
+        nudge_mode=NudgeMode.TWO_STAGE,
+        urgent_quiet_bypass=True,
+        tentative=False,
+    )
+
+    tentative_schedule = resolve_day_schedule(TARGET_MONDAY, [], [], [tentative])
+    assert evaluate_due_nudges(tentative_schedule, 650, set()) == ()
+    assert evaluate_due_nudges(tentative_schedule, 660, set()) == ()
+
+    confirmed_schedule = resolve_day_schedule(TARGET_MONDAY, [], [], [confirmed])
+    assert [n.stage for n in evaluate_due_nudges(confirmed_schedule, 650, set())] == ["pre_end_10m"]
+    assert [n.stage for n in evaluate_due_nudges(confirmed_schedule, 660, set())] == ["boundary"]

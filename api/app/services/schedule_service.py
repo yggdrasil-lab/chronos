@@ -224,6 +224,7 @@ class ScheduleService:
         external_ref: str | None,
         nudge_mode: NudgeMode | None,
         urgent_quiet_bypass: bool = False,
+        tentative: bool = False,
         notes: str | None = None,
     ) -> Commitment:
         clean_title = _require_non_empty(title, "title")
@@ -243,6 +244,7 @@ class ScheduleService:
             external_ref=external_ref,
             nudge_mode=resolved_nudge,
             urgent_quiet_bypass=urgent_quiet_bypass,
+            tentative=tentative,
             notes=notes,
         )
 
@@ -262,6 +264,8 @@ class ScheduleService:
         external_ref_provided: bool = False,
         nudge_mode: NudgeMode | None = None,
         urgent_quiet_bypass: bool | None = None,
+        tentative: bool | None = None,
+        tentative_provided: bool = False,
         notes: str | None = None,
         notes_provided: bool = False,
     ) -> Commitment:
@@ -278,6 +282,12 @@ class ScheduleService:
             next_start = None
             next_end = None
         _validate_commitment_timing(next_all_day, next_start, next_end)
+        if tentative_provided:
+            if tentative is None:
+                raise ScheduleValidationError("tentative must be a boolean.")
+            next_tentative = tentative
+        else:
+            next_tentative = existing.tentative
 
         updated = self._repo.update_commitment(
             commitment_id,
@@ -294,6 +304,7 @@ class ScheduleService:
                 if urgent_quiet_bypass is not None
                 else existing.urgent_quiet_bypass
             ),
+            tentative=next_tentative,
             notes=notes if notes_provided else existing.notes,
         )
         if updated is None:

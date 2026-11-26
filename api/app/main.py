@@ -21,6 +21,7 @@ from app.routers import (
     exceptions,
     friction,
     health,
+    integrations,
     push,
     schedule,
     weekly_grid,
@@ -101,3 +102,4 @@ app.include_router(schedule.router)
 app.include_router(cues.router)
 app.include_router(friction.router)
 app.include_router(push.router)
+app.include_router(integrations.router)
