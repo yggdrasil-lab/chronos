@@ -67,6 +67,11 @@ class ScheduleRepository(Protocol):
     def list_exceptions_for_date(self, target_date: date) -> list[GridException]:
         """Return all per-date exceptions for the given target date."""
 
+    def list_exceptions_in_range(
+        self, start_date: date, end_date: date
+    ) -> tuple[GridException, ...]:
+        """Return all per-date exceptions within [start_date, end_date] inclusive."""
+
     def get_exception(self, exception_id: int) -> GridException | None:
         """Return a single grid exception by ID, or None if missing."""
 

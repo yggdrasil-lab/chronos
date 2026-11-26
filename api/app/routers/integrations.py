@@ -1,13 +1,19 @@
-"""Machine-to-machine integration endpoints (Iris email ingestion)."""
+"""Machine-to-machine integration endpoints (Iris email ingestion and Odin daily summary)."""
 
+from datetime import date
 import hmac
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from app.config import settings
-from app.routers.deps import get_email_ingestion_service
-from app.schemas.integrations import EmailIngestionResponse, InboundEmailPayload
+from app.routers.deps import get_daily_summary_service, get_email_ingestion_service
+from app.schemas.integrations import (
+    DailySummaryResponse,
+    EmailIngestionResponse,
+    InboundEmailPayload,
+)
 from app.schemas.schedule import CommitmentResponse
+from app.services.daily_summary_service import DailySummaryService
 from app.services.email_ingestion import (
     EmailIngestionService,
     ScheduleExtractionUpstreamError,
@@ -74,3 +80,12 @@ def ingest_email_commitment(
         consumer_ref=result.consumer_ref,
         commitment=CommitmentResponse.from_domain(result.commitment),
     )
+
+
+@router.get("/daily-summary", response_model=DailySummaryResponse)
+def get_daily_summary(
+    target_date: date | None = Query(default=None),
+    service: DailySummaryService = Depends(get_daily_summary_service),
+) -> DailySummaryResponse:
+    """Return unauthenticated internal aether-net summary for Odin morning copilot."""
+    return service.build_daily_summary(target_date=target_date)

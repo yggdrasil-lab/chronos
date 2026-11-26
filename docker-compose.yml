@@ -60,12 +60,16 @@ services:
       - CHRONOS_MUNINN_API_BASE=http://muninn:4000/v1
       - CHRONOS_MUNINN_MODEL=app-synthesize
       - CHRONOS_MUNINN_API_KEY_FILE=/run/secrets/chronos_muninn_api_key
+      - CHRONOS_ICS_TOKEN_FILE=/run/secrets/chronos_ics_token
+      - CHRONOS_MCP_TOKEN_FILE=/run/secrets/chronos_mcp_token
       - TZ=Pacific/Auckland
     secrets:
       - chronos_db_password
       - chronos_vapid_private_key
       - chronos_webhook_secret
       - chronos_muninn_api_key
+      - chronos_ics_token
+      - chronos_mcp_token
     networks:
       - aether-net
     labels:
@@ -94,6 +98,25 @@ services:
         - "traefik.http.routers.chronos-api.service=chronos-api"
         - "traefik.http.routers.chronos-api.middlewares=authentik@docker,chronos-api-strip"
         - "traefik.http.middlewares.chronos-api-strip.stripprefix.prefixes=/api"
+        - "traefik.http.middlewares.chronos-strip-authentik.headers.customrequestheaders.X-authentik-username="
+        - "traefik.http.middlewares.chronos-strip-authentik.headers.customrequestheaders.X-authentik-email="
+        - "traefik.http.middlewares.chronos-strip-authentik.headers.customrequestheaders.X-authentik-groups="
+        - "traefik.http.middlewares.chronos-strip-authentik.headers.customrequestheaders.X-authentik-name="
+        - "traefik.http.middlewares.chronos-strip-authentik.headers.customrequestheaders.X-authentik-uid="
+        - "traefik.http.routers.chronos-ics.rule=Host(`chronos.${DOMAIN_NAME}`) && PathPrefix(`/ics/`)"
+        - "traefik.http.routers.chronos-ics.entrypoints=websecure"
+        - "traefik.http.routers.chronos-ics.tls=true"
+        - "traefik.http.routers.chronos-ics.tls.certresolver=cloudflare"
+        - "traefik.http.routers.chronos-ics.priority=20"
+        - "traefik.http.routers.chronos-ics.service=chronos-api"
+        - "traefik.http.routers.chronos-ics.middlewares=chronos-strip-authentik"
+        - "traefik.http.routers.chronos-mcp.rule=Host(`chronos.${DOMAIN_NAME}`) && PathPrefix(`/mcp`)"
+        - "traefik.http.routers.chronos-mcp.entrypoints=websecure"
+        - "traefik.http.routers.chronos-mcp.tls=true"
+        - "traefik.http.routers.chronos-mcp.tls.certresolver=cloudflare"
+        - "traefik.http.routers.chronos-mcp.priority=20"
+        - "traefik.http.routers.chronos-mcp.service=chronos-api"
+        - "traefik.http.routers.chronos-mcp.middlewares=chronos-strip-authentik"
         - "traefik.http.services.chronos-api.loadbalancer.server.port=8000"
         - "traefik.docker.network=aether-net"
 
@@ -110,6 +133,12 @@ secrets:
   chronos_muninn_api_key:
     external: true
     name: ${CHRONOS_MUNINN_API_KEY_NAME}
+  chronos_ics_token:
+    external: true
+    name: ${CHRONOS_ICS_TOKEN_NAME}
+  chronos_mcp_token:
+    external: true
+    name: ${CHRONOS_MCP_TOKEN_NAME}
 
 networks:
   aether-net:

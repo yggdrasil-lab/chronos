@@ -15,12 +15,14 @@ from app.domain.errors import (
     ScheduleConflictError,
     ScheduleValidationError,
 )
+from app.mcp_server import install_mcp
 from app.routers import (
     commitments,
     cues,
     exceptions,
     friction,
     health,
+    ics,
     integrations,
     push,
     schedule,
@@ -103,3 +105,5 @@ app.include_router(cues.router)
 app.include_router(friction.router)
 app.include_router(push.router)
 app.include_router(integrations.router)
+app.include_router(ics.router)
+install_mcp(app)

@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     muninn_api_key: str = ""
     muninn_api_key_file: str = ""
     muninn_model: str = "app-synthesize"
+    ics_token: str = ""
+    ics_token_file: str = ""
+    mcp_token: str = ""
+    mcp_token_file: str = ""
 
     model_config = SettingsConfigDict(
         env_prefix="CHRONOS_",
@@ -63,32 +67,25 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _load_and_validate_secrets(self) -> "Settings":
         """Load Swarm secret files and enforce fail-fast production credentials."""
-        if self.db_password_file:
-            secret_value = _read_secret_file(self.db_password_file, "Database password")
-            if not self.db_password:
-                self.db_password = secret_value
-
-        if self.vapid_private_key_file:
-            vapid_secret = _read_secret_file(self.vapid_private_key_file, "VAPID private key")
-            if not self.vapid_private_key:
-                self.vapid_private_key = vapid_secret
-
-        if self.webhook_secret_file:
-            webhook_val = _read_secret_file(self.webhook_secret_file, "Webhook secret")
-            if not self.webhook_secret:
-                self.webhook_secret = webhook_val
-
-        if self.muninn_api_key_file:
-            muninn_val = _read_secret_file(self.muninn_api_key_file, "Muninn API key")
-            if not self.muninn_api_key:
-                self.muninn_api_key = muninn_val
+        secret_bindings = (
+            ("db_password", "db_password_file", "Database password"),
+            ("vapid_private_key", "vapid_private_key_file", "VAPID private key"),
+            ("webhook_secret", "webhook_secret_file", "Webhook secret"),
+            ("muninn_api_key", "muninn_api_key_file", "Muninn API key"),
+            ("ics_token", "ics_token_file", "ICS token"),
+            ("mcp_token", "mcp_token_file", "MCP token"),
+        )
+        for value_attr, file_attr, label in secret_bindings:
+            file_path = getattr(self, file_attr)
+            if file_path:
+                loaded = _read_secret_file(file_path, label)
+                if not getattr(self, value_attr):
+                    setattr(self, value_attr, loaded)
 
         if self.push_poll_interval_seconds <= 0:
             raise ValueError("CHRONOS_PUSH_POLL_INTERVAL_SECONDS must be > 0.")
-
         if self.peer_timeout_seconds <= 0:
             raise ValueError("CHRONOS_PEER_TIMEOUT_SECONDS must be > 0.")
-
         if self.environment.strip().lower() == "production":
             self._validate_production_requirements()
 
@@ -97,7 +94,6 @@ class Settings(BaseSettings):
                 f"postgresql+psycopg://{quote_plus(self.db_user)}:{quote_plus(self.db_password)}"
                 f"@{self.db_host}:{self.db_port}/{self.db_name}"
             )
-
         return self
 
     def _validate_production_requirements(self) -> None:
@@ -124,6 +120,10 @@ class Settings(BaseSettings):
             missing.append("CHRONOS_MUNINN_API_BASE")
         if not self.muninn_api_key.strip():
             missing.append("CHRONOS_MUNINN_API_KEY (or CHRONOS_MUNINN_API_KEY_FILE)")
+        if not self.ics_token.strip():
+            missing.append("CHRONOS_ICS_TOKEN (or CHRONOS_ICS_TOKEN_FILE)")
+        if not self.mcp_token.strip():
+            missing.append("CHRONOS_MCP_TOKEN (or CHRONOS_MCP_TOKEN_FILE)")
         if missing:
             raise ValueError(
                 f"Missing required production configuration: {', '.join(missing)}"

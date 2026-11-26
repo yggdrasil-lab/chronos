@@ -171,6 +171,23 @@ class SqlAlchemyScheduleRepository:
         )
         return [_to_grid_exception(row) for row in self._db.scalars(stmt).all()]
 
+    def list_exceptions_in_range(
+        self, start_date: date, end_date: date
+    ) -> tuple[GridException, ...]:
+        stmt = (
+            select(GridExceptionORM)
+            .where(
+                GridExceptionORM.target_date >= start_date,
+                GridExceptionORM.target_date <= end_date,
+            )
+            .order_by(
+                GridExceptionORM.target_date,
+                GridExceptionORM.grid_block_id,
+                GridExceptionORM.id,
+            )
+        )
+        return tuple(_to_grid_exception(row) for row in self._db.scalars(stmt).all())
+
     def get_exception(self, exception_id: int) -> GridException | None:
         row = self._db.get(GridExceptionORM, exception_id)
         return _to_grid_exception(row) if row is not None else None
