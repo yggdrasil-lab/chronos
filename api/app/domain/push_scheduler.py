@@ -90,6 +90,11 @@ def evaluate_due_nudges(
     if not travel_active and QUIET_HOURS_START_MINUTE <= now_minute < SCREENS_OFF_WINDOW_END_MINUTE:
         screens_off_key = f"{schedule.target_date.isoformat()}:quiet_hours:screens_off:screens_off"
         if screens_off_key not in already_sent_keys:
+            body = (
+                f"It is 22:00. {schedule.sleep_pressure_nudge.reason} Keep lights dim and wind down calmly without forcing sleep."
+                if schedule.sleep_pressure_nudge is not None
+                else "It is 22:00. Wind down for sleep; non-urgent nudges are paused until 06:30."
+            )
             due.append(
                 DueNudge(
                     dedupe_key=screens_off_key,
@@ -98,7 +103,7 @@ def evaluate_due_nudges(
                     source_id="screens_off",
                     stage="screens_off",
                     title="Screens Off - Quiet Hours",
-                    body="It is 22:00. Wind down for sleep; non-urgent nudges are paused until 06:30.",
+                    body=body,
                     tag="chronos-quiet-hours-screens-off",
                     url="/?tab=now",
                 )

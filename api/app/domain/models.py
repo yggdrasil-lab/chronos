@@ -7,6 +7,8 @@ from datetime import date, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Literal
 
+from app.domain.sleep_recovery import NapRecoveryBlock, SleepPressureNudge
+
 if TYPE_CHECKING:
     from app.domain.fasting import FastingSuggestion
 
@@ -203,6 +205,8 @@ class DaySchedule:
     workout_hydration: DayWorkoutHydration | None = None
     fasting_suggestion: FastingSuggestion | None = None
     travel_overlay: TravelOverlay | None = None
+    naps: tuple[NapRecoveryBlock, ...] = ()
+    sleep_pressure_nudge: SleepPressureNudge | None = None
 
     @property
     def has_conflicts(self) -> bool:
@@ -223,6 +227,7 @@ class NowNextState:
     is_quiet_hours: bool
     workout_hydration: DayWorkoutHydration | None = None
     fasting_suggestion: FastingSuggestion | None = None
+    sleep_pressure_nudge: SleepPressureNudge | None = None
 
 
 @dataclass(frozen=True)

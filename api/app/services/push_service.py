@@ -1,14 +1,23 @@
 """Application service for Web Push subscription management and nudge dispatch."""
 
-from datetime import datetime
+from dataclasses import replace
+from datetime import date, datetime
 import logging
 from zoneinfo import ZoneInfo
 
 from app.domain.errors import ScheduleValidationError
-from app.domain.models import DueNudge, PushSubscription
-from app.domain.push_scheduler import evaluate_due_nudges
-from app.domain.schedule_engine import resolve_day_schedule
+from app.domain.models import DaySchedule, DueNudge, PushSubscription
+from app.domain.push_scheduler import (
+    SCREENS_OFF_WINDOW_END_MINUTE,
+    evaluate_due_nudges,
+)
+from app.domain.schedule_engine import QUIET_HOURS_START_MINUTE, resolve_day_schedule
+from app.domain.sleep_recovery import (
+    build_nap_recovery_blocks,
+    evaluate_sleep_pressure_nudge,
+)
 from app.repositories.protocols import PushRepository, ScheduleRepository
+from app.services.peer_gateways import EirVitalsGateway
 from app.services.push_gateway import PushGateway
 
 logger = logging.getLogger(__name__)
@@ -32,12 +41,14 @@ class PushService:
         gateway: PushGateway | None,
         vapid_public_key: str,
         timezone_name: str = "Pacific/Auckland",
+        eir_vitals_gateway: EirVitalsGateway | None = None,
     ) -> None:
         self._schedule_repo = schedule_repo
         self._push_repo = push_repo
         self._gateway = gateway
         self._vapid_public_key = vapid_public_key.strip()
         self._tz = ZoneInfo(timezone_name)
+        self._eir_vitals_gateway = eir_vitals_gateway
 
     def get_vapid_public_key(self) -> tuple[str, bool]:
         """Return (public_key, enabled) for client PushManager subscription."""
@@ -95,6 +106,7 @@ class PushService:
             commitments,
             travel_overlays=travel_overlays,
         )
+        schedule = self._attach_sleep_pressure_nudge(schedule, target_date, now_minute)
         already_sent = self._push_repo.list_sent_dedupe_keys(target_date)
         due_nudges = evaluate_due_nudges(schedule, now_minute, already_sent)
         if not due_nudges:
@@ -116,6 +128,32 @@ class PushService:
                 )
                 delivered_count += 1
         return delivered_count
+
+    def _attach_sleep_pressure_nudge(
+        self,
+        schedule: DaySchedule,
+        target_date: date,
+        now_minute: int,
+    ) -> DaySchedule:
+        if (
+            schedule.travel_overlay is not None
+            or not (QUIET_HOURS_START_MINUTE <= now_minute < SCREENS_OFF_WINDOW_END_MINUTE)
+            or self._eir_vitals_gateway is None
+        ):
+            return schedule
+        try:
+            eir_vitals = self._eir_vitals_gateway.fetch_daily_vitals(target_date)
+        except Exception as exc:
+            logger.warning("Eir vitals lookup failed during push tick: %s", exc)
+            return schedule
+        naps = build_nap_recovery_blocks(eir_vitals, self._tz)
+        nudge = evaluate_sleep_pressure_nudge(
+            naps,
+            nap_duration_hours=eir_vitals.nap_duration_hours,
+        )
+        if nudge is None:
+            return schedule
+        return replace(schedule, naps=naps, sleep_pressure_nudge=nudge)
 
     def _dispatch_nudge(
         self,

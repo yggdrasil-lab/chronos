@@ -10,9 +10,12 @@ import httpx
 
 from app.domain.errors import EntityNotFoundError, ScheduleValidationError
 from app.domain.fasting import (
-    FRIDAY_WEEKDAY,
     EirDailyVitalsSnapshot,
     evaluate_fasting_suggestion,
+)
+from app.domain.sleep_recovery import (
+    build_nap_recovery_blocks,
+    evaluate_sleep_pressure_nudge,
 )
 from app.domain.models import (
     Commitment,
@@ -428,15 +431,10 @@ class ScheduleService:
     def _fetch_schedule_peers(
         self, resolved_date: date
     ) -> tuple[KratosDaySnapshot | None, EirDailyVitalsSnapshot | None]:
-        is_friday = resolved_date.weekday() == FRIDAY_WEEKDAY
-        if not is_friday or self._eir_vitals_gateway is None:
-            kratos = (
-                self._fetch_kratos_snapshot(resolved_date)
-                if self._kratos_gateway is not None
-                else None
-            )
-            return kratos, None
-
+        if self._eir_vitals_gateway is None and self._kratos_gateway is None:
+            return None, None
+        if self._eir_vitals_gateway is None:
+            return self._fetch_kratos_snapshot(resolved_date), None
         if self._kratos_gateway is None:
             return None, self._fetch_eir_daily_vitals(resolved_date)
 
@@ -495,7 +493,17 @@ class ScheduleService:
             kratos_snapshot=kratos_snapshot,
             eir_vitals=eir_vitals,
         )
-        return replace(schedule, fasting_suggestion=fasting)
+        naps = build_nap_recovery_blocks(eir_vitals, self._tz)
+        sleep_pressure_nudge = evaluate_sleep_pressure_nudge(
+            naps,
+            nap_duration_hours=eir_vitals.nap_duration_hours if eir_vitals is not None else None,
+        )
+        return replace(
+            schedule,
+            fasting_suggestion=fasting,
+            naps=naps,
+            sleep_pressure_nudge=sleep_pressure_nudge,
+        )
 
     def get_now_next(
         self, target_date: date | None = None, now_minute: int | None = None

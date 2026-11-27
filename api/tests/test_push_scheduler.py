@@ -1,5 +1,6 @@
 """Pure unit tests for Chronos Web Push transition nudge scheduler."""
 
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -15,6 +16,7 @@ from app.domain.models import (
 )
 from app.domain.push_scheduler import evaluate_due_nudges
 from app.domain.schedule_engine import resolve_day_schedule
+from app.domain.sleep_recovery import NapRecoveryBlock, evaluate_sleep_pressure_nudge
 
 TARGET_MONDAY = date(2026, 11, 23)
 
@@ -234,3 +236,33 @@ def test_travel_overlay_suppresses_regular_nudges_and_screens_off_but_keeps_urge
     assert [(n.source_kind, n.source_id, n.stage) for n in at_2200] == [
         ("commitment", "31", "pre_end_10m")
     ]
+
+
+def test_screens_off_nudge_adapts_body_for_sleep_pressure_while_preserving_identity() -> None:
+    base_schedule = resolve_day_schedule(TARGET_MONDAY, [], [], [])
+    baseline_due = evaluate_due_nudges(base_schedule, 1320, set())
+    assert len(baseline_due) == 1
+    assert baseline_due[0].body == (
+        "It is 22:00. Wind down for sleep; non-urgent nudges are paused until 06:30."
+    )
+
+    nap = NapRecoveryBlock(
+        start_at="2026-11-23T16:29:00+13:00",
+        end_at="2026-11-23T18:39:00+13:00",
+        start_minute=989,
+        end_minute=1119,
+        duration_hours=2.18,
+    )
+    nudge = evaluate_sleep_pressure_nudge((nap,), nap_duration_hours=2.18)
+    assert nudge is not None
+    adapted_schedule = replace(base_schedule, naps=(nap,), sleep_pressure_nudge=nudge)
+    adapted_due = evaluate_due_nudges(adapted_schedule, 1320, set())
+    assert len(adapted_due) == 1
+    assert adapted_due[0].title == baseline_due[0].title
+    assert adapted_due[0].dedupe_key == baseline_due[0].dedupe_key
+    assert adapted_due[0].tag == baseline_due[0].tag
+    assert adapted_due[0].url == baseline_due[0].url
+    assert adapted_due[0].body == (
+        "It is 22:00. Late 2.2h nap ending 18:39 may delay evening sleep onset. "
+        "Keep lights dim and wind down calmly without forcing sleep."
+    )

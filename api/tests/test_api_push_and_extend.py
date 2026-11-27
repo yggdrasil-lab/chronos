@@ -2,7 +2,7 @@
 
 import base64
 from collections.abc import Generator
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -14,7 +14,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.session import Base, get_db
+from app.domain.fasting import EirDailyVitalsSnapshot
 from app.domain.models import PushSubscription
+from app.domain.passive_signals import PeerFetchStatus
+from app.domain.sleep_recovery import EirNapRecord
 from app.main import app
 from app.repositories.sqlalchemy_push_repo import SqlAlchemyPushRepository
 from app.repositories.sqlalchemy_schedule_repo import SqlAlchemyScheduleRepository
@@ -403,3 +406,95 @@ def test_push_service_loads_travel_overlay_suppresses_screens_off_and_keeps_urge
         assert payload["source_kind"] == "commitment"
         assert payload["stage"] == "pre_end_10m"
         assert payload["title"] == "Urgent Flight Check-in ends in 10m"
+
+
+def test_push_service_2200_sleep_pressure_copy_window_guard_and_fail_soft(
+    test_session_factory: sessionmaker[Session],
+) -> None:
+    class _RecordingEirVitals:
+        def __init__(self, snapshot: EirDailyVitalsSnapshot, *, raise_exc: bool = False) -> None:
+            self.snapshot = snapshot
+            self.raise_exc = raise_exc
+            self.calls: list[date] = []
+
+        def fetch_daily_vitals(self, target_date: date) -> EirDailyVitalsSnapshot:
+            self.calls.append(target_date)
+            if self.raise_exc:
+                raise RuntimeError("eir offline")
+            return self.snapshot
+
+    with TestClient(app) as client:
+        client.post(
+            "/push/subscribe",
+            json={
+                "endpoint": "https://push.example.invalid/sleep-nudge",
+                "keys": {"p256dh": "k1", "auth": "a1"},
+            },
+        )
+
+    late_nap_vitals = EirDailyVitalsSnapshot(
+        status=PeerFetchStatus(available=True),
+        nap_duration_hours=2.18,
+        nap_count=1,
+        naps=(
+            EirNapRecord(
+                start_at="2026-11-23T16:29:00+13:00",
+                end_at="2026-11-23T18:39:00+13:00",
+                duration_hours=2.18,
+            ),
+        ),
+    )
+
+    with test_session_factory() as db:
+        assert deps.build_push_service(db)._eir_vitals_gateway is not None
+
+        eir_gw = _RecordingEirVitals(late_nap_vitals)
+        fake_gateway = FakePushGateway()
+        service = PushService(
+            schedule_repo=SqlAlchemyScheduleRepository(db),
+            push_repo=SqlAlchemyPushRepository(db),
+            gateway=fake_gateway,
+            vapid_public_key="BPub",
+            timezone_name="Pacific/Auckland",
+            eir_vitals_gateway=eir_gw,
+        )
+
+        # Outside 22:00-22:15 window -> zero Eir calls
+        tick_2159 = datetime(2026, 11, 23, 21, 59, tzinfo=ZoneInfo("Pacific/Auckland"))
+        tick_2215 = datetime(2026, 11, 23, 22, 15, tzinfo=ZoneInfo("Pacific/Auckland"))
+        assert service.run_scheduled_tick(now_dt=tick_2159) == 0
+        assert service.run_scheduled_tick(now_dt=tick_2215) == 0
+        assert eir_gw.calls == []
+
+        # Inside 22:00-22:15 -> Eir called once and adapted copy dispatched
+        tick_2200 = datetime(2026, 11, 23, 22, 0, tzinfo=ZoneInfo("Pacific/Auckland"))
+        assert service.run_scheduled_tick(now_dt=tick_2200) == 1
+        assert eir_gw.calls == [date(2026, 11, 23)]
+        assert len(fake_gateway.sent) == 1
+        _, payload = fake_gateway.sent[0]
+        assert payload["title"] == "Screens Off - Quiet Hours"
+        assert payload["tag"] == "chronos-quiet-hours-screens-off"
+        assert payload["body"] == (
+            "It is 22:00. Late 2.2h nap ending 18:39 may delay evening sleep onset. "
+            "Keep lights dim and wind down calmly without forcing sleep."
+        )
+
+    # Eir outage during 22:00-22:15 fails soft to baseline 22:00 copy on fresh day
+    with test_session_factory() as db:
+        failing_eir = _RecordingEirVitals(late_nap_vitals, raise_exc=True)
+        fallback_gateway = FakePushGateway()
+        fallback_service = PushService(
+            schedule_repo=SqlAlchemyScheduleRepository(db),
+            push_repo=SqlAlchemyPushRepository(db),
+            gateway=fallback_gateway,
+            vapid_public_key="BPub",
+            timezone_name="Pacific/Auckland",
+            eir_vitals_gateway=failing_eir,
+        )
+        tick_2205_next = datetime(2026, 11, 24, 22, 5, tzinfo=ZoneInfo("Pacific/Auckland"))
+        assert fallback_service.run_scheduled_tick(now_dt=tick_2205_next) == 1
+        assert failing_eir.calls == [date(2026, 11, 24)]
+        _, fallback_payload = fallback_gateway.sent[0]
+        assert fallback_payload["body"] == (
+            "It is 22:00. Wind down for sleep; non-urgent nudges are paused until 06:30."
+        )

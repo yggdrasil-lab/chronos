@@ -10,6 +10,7 @@ from typing import Any, Protocol
 import httpx
 
 from app.domain.fasting import EirDailyVitalsSnapshot
+from app.domain.sleep_recovery import EirNapRecord
 from app.domain.passive_signals import (
     EirDaySnapshot,
     EirDetectedWorkout,
@@ -97,6 +98,32 @@ def _coerce_optional_int(value: Any) -> int | None:
     return None
 
 
+def _parse_eir_naps(raw_naps: Any) -> tuple[EirNapRecord, ...]:
+    if not isinstance(raw_naps, list):
+        return ()
+    parsed: list[EirNapRecord] = []
+    for item in raw_naps:
+        if not isinstance(item, dict):
+            continue
+        start_at = item.get("start_at")
+        end_at = item.get("end_at")
+        if not isinstance(start_at, str) or not start_at.strip():
+            continue
+        if not isinstance(end_at, str) or not end_at.strip():
+            continue
+        duration_hours = _coerce_optional_float(item.get("duration_hours"))
+        if duration_hours is None or duration_hours <= 0:
+            continue
+        parsed.append(
+            EirNapRecord(
+                start_at=start_at.strip(),
+                end_at=end_at.strip(),
+                duration_hours=duration_hours,
+            )
+        )
+    return tuple(parsed)
+
+
 class HttpEirGateway:
     """httpx-backed gateway for Eir internal aether-net endpoints."""
 
@@ -180,6 +207,15 @@ class HttpEirGateway:
                 status=PeerFetchStatus(available=False, error="Invalid Eir daily vitals payload")
             )
 
+        naps = _parse_eir_naps(payload.get("naps"))
+        nap_duration_hours = _coerce_optional_float(payload.get("nap_duration_hours"))
+        if nap_duration_hours is not None and nap_duration_hours < 0:
+            nap_duration_hours = None
+        raw_nap_count = _coerce_optional_int(payload.get("nap_count"))
+        nap_count = (
+            raw_nap_count if raw_nap_count is not None and raw_nap_count >= 0 else len(naps)
+        )
+
         return EirDailyVitalsSnapshot(
             status=PeerFetchStatus(available=True),
             sleep_duration_hours=_coerce_optional_float(payload.get("sleep_duration_hours")),
@@ -187,6 +223,9 @@ class HttpEirGateway:
             hrv_ms=_coerce_optional_float(payload.get("hrv_ms")),
             overnight_hrv_ms=_coerce_optional_float(payload.get("overnight_hrv_ms")),
             resting_hr_bpm=_coerce_optional_int(payload.get("resting_hr_bpm")),
+            nap_duration_hours=nap_duration_hours,
+            nap_count=nap_count,
+            naps=naps,
         )
 
 

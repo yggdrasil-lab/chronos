@@ -8,6 +8,8 @@ from datetime import date, time
 import math
 from typing import TYPE_CHECKING, Any, Literal
 
+from app.domain.sleep_recovery import EirNapRecord
+
 if TYPE_CHECKING:
     from app.domain.passive_signals import (
         KratosDaySnapshot,
@@ -44,6 +46,9 @@ class EirDailyVitalsSnapshot:
     hrv_ms: float | None = None
     overnight_hrv_ms: float | None = None
     resting_hr_bpm: int | None = None
+    nap_duration_hours: float | None = None
+    nap_count: int = 0
+    naps: tuple[EirNapRecord, ...] = ()
 
 
 @dataclass(frozen=True)
