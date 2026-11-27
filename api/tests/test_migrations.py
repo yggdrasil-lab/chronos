@@ -18,6 +18,7 @@ from app.db.orm_models import (
     HabitCueORM,
     PushDeliveryORM,
     PushSubscriptionORM,
+    TravelOverlayORM,
 )
 
 
@@ -52,6 +53,10 @@ def test_alembic_upgrade_downgrade_roundtrip(tmp_path: Path, monkeypatch) -> Non
             row[1]
             for row in conn.execute("PRAGMA index_list(push_deliveries)").fetchall()
         }
+        travel_overlay_indexes = {
+            row[1]
+            for row in conn.execute("PRAGMA index_list(travel_overlays)").fetchall()
+        }
 
     assert {
         "grid_blocks",
@@ -62,13 +67,16 @@ def test_alembic_upgrade_downgrade_roundtrip(tmp_path: Path, monkeypatch) -> Non
         "friction_notes",
         "push_subscriptions",
         "push_deliveries",
+        "travel_overlays",
     }.issubset(tables)
-    assert version == ("0004_tentative_commitments",)
+    assert version == ("0005_travel_overlays",)
     assert "ix_grid_exceptions_grid_block_id" in exception_indexes
     assert "ix_grid_exceptions_target_date" in exception_indexes
     assert "ix_commitments_date_start" in commitment_indexes
     assert "uq_commitments_source_external_ref" in commitment_indexes
     assert "ix_push_deliveries_target_date" in push_delivery_indexes
+    assert "uq_travel_overlays_external_ref" in travel_overlay_indexes
+    assert "ix_travel_overlays_dates" in travel_overlay_indexes
 
     alembic_command.downgrade(cfg, "base")
     with sqlite3.connect(db_file) as conn:
@@ -87,6 +95,7 @@ def test_alembic_upgrade_downgrade_roundtrip(tmp_path: Path, monkeypatch) -> Non
         "friction_notes",
         "push_subscriptions",
         "push_deliveries",
+        "travel_overlays",
     ):
         assert table_name not in down_tables
 
@@ -104,6 +113,7 @@ def test_alembic_upgrade_downgrade_roundtrip(tmp_path: Path, monkeypatch) -> Non
                 FrictionNoteORM,
                 PushSubscriptionORM,
                 PushDeliveryORM,
+                TravelOverlayORM,
             ):
                 session.scalars(select(model).limit(1)).all()
     finally:

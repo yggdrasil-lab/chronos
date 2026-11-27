@@ -4,7 +4,19 @@ from datetime import UTC, date, datetime
 import uuid
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -222,3 +234,25 @@ class PushDeliveryORM(Base):
     source_id: Mapped[str] = mapped_column(String(64), nullable=False)
     stage: Mapped[str] = mapped_column(String(32), nullable=False)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class TravelOverlayORM(Base):
+    """Persistent date-bounded travel mode overlay keyed by external_ref."""
+
+    __tablename__ = "travel_overlays"
+    __table_args__ = (
+        CheckConstraint("end_date >= start_date", name="ck_travel_overlays_date_range"),
+        Index("uq_travel_overlays_external_ref", "external_ref", unique=True),
+        Index("ix_travel_overlays_dates", "start_date", "end_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    external_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    mode: Mapped[str] = mapped_column(String(40), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )

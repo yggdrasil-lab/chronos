@@ -4,6 +4,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
+from app.domain.models import CommitmentSource
 from app.routers.deps import get_schedule_service
 from app.schemas.schedule import CommitmentCreate, CommitmentResponse, CommitmentUpdate
 from app.services.schedule_service import ScheduleService
@@ -15,10 +16,17 @@ router = APIRouter(prefix="/commitments", tags=["Commitments"])
 def list_commitments(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
+    source: CommitmentSource | None = Query(default=None),
+    external_ref_prefix: str | None = Query(default=None),
     service: ScheduleService = Depends(get_schedule_service),
 ) -> list[CommitmentResponse]:
-    """List commitments optionally filtered by inclusive date range."""
-    items = service.list_commitments(start_date=start_date, end_date=end_date)
+    """List commitments optionally filtered by date range, source, and external_ref prefix."""
+    items = service.list_commitments(
+        start_date=start_date,
+        end_date=end_date,
+        source=source,
+        external_ref_prefix=external_ref_prefix,
+    )
     return [CommitmentResponse.from_domain(item) for item in items]
 
 
@@ -27,7 +35,7 @@ def create_commitment(
     payload: CommitmentCreate,
     service: ScheduleService = Depends(get_schedule_service),
 ) -> CommitmentResponse:
-    """Create a dated commitment."""
+    """Create or optionally upsert a dated commitment."""
     item = service.create_commitment(
         title=payload.title,
         target_date=payload.target_date,
@@ -40,6 +48,7 @@ def create_commitment(
         urgent_quiet_bypass=payload.urgent_quiet_bypass,
         tentative=payload.tentative,
         notes=payload.notes,
+        upsert_by_external_ref=payload.upsert_by_external_ref,
     )
     return CommitmentResponse.from_domain(item)
 
@@ -72,6 +81,17 @@ def update_commitment(
         notes_provided="notes" in fields,
     )
     return CommitmentResponse.from_domain(item)
+
+
+@router.delete("/by-ref", status_code=status.HTTP_204_NO_CONTENT)
+def delete_commitment_by_ref(
+    source: CommitmentSource = Query(...),
+    external_ref: str = Query(...),
+    service: ScheduleService = Depends(get_schedule_service),
+) -> Response:
+    """Idempotently delete a commitment by (source, external_ref)."""
+    service.delete_commitment_by_ref(source=source, external_ref=external_ref)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/{commitment_id}", status_code=status.HTTP_204_NO_CONTENT)

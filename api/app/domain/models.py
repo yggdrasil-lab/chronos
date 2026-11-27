@@ -25,6 +25,14 @@ class CommitmentSource(str, Enum):
     MANUAL = "manual"
     IRIS = "iris"
     KRATOS = "kratos"
+    TRAVEL = "travel"
+
+
+class TravelOverlayMode(str, Enum):
+    """Grid suppression behavior while a travel overlay covers a date."""
+
+    SUPPRESS_ALL_GRID_BLOCKS = "suppress_all_grid_blocks"
+    KEEP_WORK_BLOCKS = "keep_work_blocks"
 
 
 class SliceKind(str, Enum):
@@ -173,6 +181,18 @@ class ResolvedSlice:
 
 
 @dataclass(frozen=True)
+class TravelOverlay:
+    """Date-bounded travel mode overlay altering grid block visibility and nudges."""
+
+    id: int
+    external_ref: str
+    label: str
+    start_date: date
+    end_date: date
+    mode: TravelOverlayMode
+
+
+@dataclass(frozen=True)
 class DaySchedule:
     """Resolved schedule output for a single calendar date."""
 
@@ -182,6 +202,7 @@ class DaySchedule:
     timed_commitments: tuple[Commitment, ...]
     workout_hydration: DayWorkoutHydration | None = None
     fasting_suggestion: FastingSuggestion | None = None
+    travel_overlay: TravelOverlay | None = None
 
     @property
     def has_conflicts(self) -> bool:

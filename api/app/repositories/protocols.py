@@ -16,6 +16,8 @@ from app.domain.models import (
     NudgeMode,
     PushDelivery,
     PushSubscription,
+    TravelOverlay,
+    TravelOverlayMode,
 )
 
 
@@ -95,9 +97,14 @@ class ScheduleRepository(Protocol):
         """Delete a grid exception and return True if it existed."""
 
     def list_commitments(
-        self, *, start_date: date | None = None, end_date: date | None = None
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        source: CommitmentSource | None = None,
+        external_ref_prefix: str | None = None,
     ) -> list[Commitment]:
-        """Return commitments optionally bounded by inclusive start_date and end_date."""
+        """Return commitments optionally bounded by date range, source, and external_ref prefix."""
 
     def get_commitment(self, commitment_id: int) -> Commitment | None:
         """Return a single commitment by ID, or None if missing."""
@@ -144,6 +151,51 @@ class ScheduleRepository(Protocol):
 
     def delete_commitment(self, commitment_id: int) -> bool:
         """Delete a commitment and return True if it existed."""
+
+    def upsert_commitment_by_source_external_ref(
+        self,
+        *,
+        title: str,
+        target_date: date,
+        start_minute: int | None,
+        end_minute: int | None,
+        all_day: bool,
+        source: CommitmentSource,
+        external_ref: str,
+        nudge_mode: NudgeMode,
+        urgent_quiet_bypass: bool,
+        tentative: bool = False,
+        notes: str | None,
+    ) -> Commitment:
+        """Insert or update a commitment matched by (source, external_ref)."""
+
+    def delete_commitment_by_source_external_ref(
+        self, source: CommitmentSource, external_ref: str
+    ) -> bool:
+        """Delete a commitment matching (source, external_ref) and return True if deleted."""
+
+    def list_travel_overlays(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        external_ref: str | None = None,
+    ) -> list[TravelOverlay]:
+        """Return travel overlays optionally overlapping [start_date, end_date] or matching ref."""
+
+    def upsert_travel_overlay(
+        self,
+        *,
+        external_ref: str,
+        label: str,
+        start_date: date,
+        end_date: date,
+        mode: TravelOverlayMode,
+    ) -> TravelOverlay:
+        """Insert or update a travel overlay keyed by unique external_ref."""
+
+    def delete_travel_overlay_by_external_ref(self, external_ref: str) -> bool:
+        """Delete a travel overlay matching external_ref and return True if deleted."""
 
 
 class HabitCueRepository(Protocol):

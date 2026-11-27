@@ -348,3 +348,58 @@ def test_extend_endpoint_trims_flexible_blocks_preserves_commitments_and_enforce
             json={"target_date": "2026-11-23", "grid_block_id": midnight_block["id"], "minutes": 15},
         )
         assert midnight_ext.status_code == 409
+
+
+def test_push_service_loads_travel_overlay_suppresses_screens_off_and_keeps_urgent_bypass(
+    test_session_factory: sessionmaker[Session],
+) -> None:
+    with TestClient(app) as client:
+        client.post(
+            "/schedule/travel-mode",
+            json={
+                "external_ref": "odysseus:kyoto-2027",
+                "label": "Kyoto Trip",
+                "start_date": "2026-11-23",
+                "end_date": "2026-11-25",
+                "mode": "suppress_all_grid_blocks",
+                "active": True,
+            },
+        )
+        client.post(
+            "/commitments",
+            json={
+                "title": "Urgent Flight Check-in",
+                "target_date": "2026-11-23",
+                "start_minute": 1300,
+                "end_minute": 1330,
+                "source": "travel",
+                "external_ref": "odysseus:kyoto-2027:item:9",
+                "nudge_mode": "two-stage",
+                "urgent_quiet_bypass": True,
+                "upsert_by_external_ref": True,
+            },
+        )
+        client.post(
+            "/push/subscribe",
+            json={
+                "endpoint": "https://push.example.invalid/travel",
+                "keys": {"p256dh": "k1", "auth": "a1"},
+            },
+        )
+
+    fake_gateway = FakePushGateway()
+    with test_session_factory() as db:
+        service = PushService(
+            schedule_repo=SqlAlchemyScheduleRepository(db),
+            push_repo=SqlAlchemyPushRepository(db),
+            gateway=fake_gateway,
+            vapid_public_key="BPub",
+            timezone_name="Pacific/Auckland",
+        )
+        tick_2200 = datetime(2026, 11, 23, 22, 0, tzinfo=ZoneInfo("Pacific/Auckland"))
+        assert service.run_scheduled_tick(now_dt=tick_2200) == 1
+        assert len(fake_gateway.sent) == 1
+        _endpoint, payload = fake_gateway.sent[0]
+        assert payload["source_kind"] == "commitment"
+        assert payload["stage"] == "pre_end_10m"
+        assert payload["title"] == "Urgent Flight Check-in ends in 10m"

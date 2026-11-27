@@ -85,7 +85,16 @@ class PushService:
         commitments = self._schedule_repo.list_commitments(
             start_date=target_date, end_date=target_date
         )
-        schedule = resolve_day_schedule(target_date, grid_blocks, exceptions, commitments)
+        travel_overlays = self._schedule_repo.list_travel_overlays(
+            start_date=target_date, end_date=target_date
+        )
+        schedule = resolve_day_schedule(
+            target_date,
+            grid_blocks,
+            exceptions,
+            commitments,
+            travel_overlays=travel_overlays,
+        )
         already_sent = self._push_repo.list_sent_dedupe_keys(target_date)
         due_nudges = evaluate_due_nudges(schedule, now_minute, already_sent)
         if not due_nudges:

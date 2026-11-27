@@ -70,12 +70,15 @@ def evaluate_due_nudges(
         raise ScheduleValidationError(f"now_minute must be within [0, 1440], got {now_minute}.")
 
     quiet_hours = now_minute >= QUIET_HOURS_START_MINUTE or now_minute < QUIET_HOURS_END_MINUTE
+    travel_active = schedule.travel_overlay is not None
     due: list[DueNudge] = []
 
     for item in schedule.slices:
         if item.suppressed_tail or item.tentative:
             continue
-        if quiet_hours and not (item.kind == SliceKind.COMMITMENT and item.urgent_quiet_bypass):
+        if (quiet_hours or travel_active) and not (
+            item.kind == SliceKind.COMMITMENT and item.urgent_quiet_bypass
+        ):
             continue
         stage = _due_stage_for_slice(item, now_minute)
         if stage is None:
@@ -84,7 +87,7 @@ def evaluate_due_nudges(
         if nudge.dedupe_key not in already_sent_keys:
             due.append(nudge)
 
-    if QUIET_HOURS_START_MINUTE <= now_minute < SCREENS_OFF_WINDOW_END_MINUTE:
+    if not travel_active and QUIET_HOURS_START_MINUTE <= now_minute < SCREENS_OFF_WINDOW_END_MINUTE:
         screens_off_key = f"{schedule.target_date.isoformat()}:quiet_hours:screens_off:screens_off"
         if screens_off_key not in already_sent_keys:
             due.append(

@@ -16,6 +16,7 @@ from app.domain.models import (
     GridException,
     HydratedWorkout,
     SliceKind,
+    TravelOverlay,
 )
 from app.domain.passive_signals import (
     KratosDaySnapshot,
@@ -179,6 +180,7 @@ class IcsService:
         kratos_snapshot: KratosDaySnapshot | None,
         grid_blocks: list[GridBlock],
         day_exceptions: list[GridException],
+        travel_overlays: list[TravelOverlay],
         include_grid: bool,
     ) -> list[IcsEvent]:
         events = [
@@ -199,6 +201,7 @@ class IcsService:
             grid_blocks if include_grid else (),
             day_exceptions if include_grid else (),
             [*confirmed_commitments, *completed_commitments],
+            travel_overlays=travel_overlays,
         )
         if kratos_snapshot is not None:
             planned = self._project_kratos_plan(
@@ -241,6 +244,9 @@ class IcsService:
         grid_blocks, exceptions_by_date = self._load_grid_context(
             start_date, end_date, include_grid
         )
+        travel_overlays = self._repo.list_travel_overlays(
+            start_date=start_date, end_date=end_date
+        )
         kratos_by_week = self._fetch_kratos_snapshots_by_week(dates)
         events: list[IcsEvent] = []
         for day in dates:
@@ -252,6 +258,7 @@ class IcsService:
                     kratos_snapshot=kratos_by_week.get((iso_year, iso_week)),
                     grid_blocks=grid_blocks,
                     day_exceptions=exceptions_by_date.get(day, []),
+                    travel_overlays=travel_overlays,
                     include_grid=include_grid,
                 )
             )
