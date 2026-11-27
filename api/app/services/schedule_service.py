@@ -22,6 +22,8 @@ from app.domain.models import (
     GridException,
     NowNextState,
     NudgeMode,
+    TravelOverlay,
+    TravelOverlayMode,
 )
 from app.domain.passive_signals import (
     KratosDaySnapshot,
@@ -215,11 +217,21 @@ class ScheduleService:
             raise EntityNotFoundError(f"GridException {exception_id} not found.")
 
     def list_commitments(
-        self, *, start_date: date | None = None, end_date: date | None = None
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        source: CommitmentSource | None = None,
+        external_ref_prefix: str | None = None,
     ) -> list[Commitment]:
         if start_date is not None and end_date is not None and start_date > end_date:
             raise ScheduleValidationError("start_date must be <= end_date.")
-        return self._repo.list_commitments(start_date=start_date, end_date=end_date)
+        return self._repo.list_commitments(
+            start_date=start_date,
+            end_date=end_date,
+            source=source,
+            external_ref_prefix=external_ref_prefix,
+        )
 
     def create_commitment(
         self,
@@ -235,6 +247,7 @@ class ScheduleService:
         urgent_quiet_bypass: bool = False,
         tentative: bool = False,
         notes: str | None = None,
+        upsert_by_external_ref: bool = False,
     ) -> Commitment:
         clean_title = _require_non_empty(title, "title")
         _validate_commitment_timing(all_day, start_minute, end_minute)
@@ -243,6 +256,21 @@ class ScheduleService:
             if nudge_mode is not None
             else (NudgeMode.NONE if all_day else NudgeMode.TWO_STAGE)
         )
+        if upsert_by_external_ref:
+            clean_ref = _require_non_empty(external_ref or "", "external_ref")
+            return self._repo.upsert_commitment_by_source_external_ref(
+                title=clean_title,
+                target_date=target_date,
+                start_minute=start_minute,
+                end_minute=end_minute,
+                all_day=all_day,
+                source=source,
+                external_ref=clean_ref,
+                nudge_mode=resolved_nudge,
+                urgent_quiet_bypass=urgent_quiet_bypass,
+                tentative=tentative,
+                notes=notes,
+            )
         return self._repo.create_commitment(
             title=clean_title,
             target_date=target_date,
@@ -324,6 +352,61 @@ class ScheduleService:
         if not self._repo.delete_commitment(commitment_id):
             raise EntityNotFoundError(f"Commitment {commitment_id} not found.")
 
+    def delete_commitment_by_ref(
+        self, *, source: CommitmentSource, external_ref: str
+    ) -> None:
+        clean_ref = _require_non_empty(external_ref, "external_ref")
+        self._repo.delete_commitment_by_source_external_ref(source, clean_ref)
+
+    def list_travel_overlays(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        external_ref: str | None = None,
+    ) -> list[TravelOverlay]:
+        if start_date is not None and end_date is not None and start_date > end_date:
+            raise ScheduleValidationError("start_date must be <= end_date.")
+        clean_ref = external_ref.strip() if external_ref is not None else None
+        return self._repo.list_travel_overlays(
+            start_date=start_date,
+            end_date=end_date,
+            external_ref=clean_ref,
+        )
+
+    def upsert_travel_overlay(
+        self,
+        *,
+        external_ref: str,
+        label: str,
+        start_date: date | None,
+        end_date: date | None,
+        mode: TravelOverlayMode,
+        active: bool,
+    ) -> TravelOverlay | None:
+        clean_ref = _require_non_empty(external_ref, "external_ref")
+        if not active:
+            self._repo.delete_travel_overlay_by_external_ref(clean_ref)
+            return None
+        clean_label = _require_non_empty(label, "label")
+        if start_date is None or end_date is None:
+            raise ScheduleValidationError(
+                "Active travel overlays require both start_date and end_date."
+            )
+        if end_date < start_date:
+            raise ScheduleValidationError("end_date must be >= start_date.")
+        return self._repo.upsert_travel_overlay(
+            external_ref=clean_ref,
+            label=clean_label,
+            start_date=start_date,
+            end_date=end_date,
+            mode=mode,
+        )
+
+    def delete_travel_overlay(self, external_ref: str) -> None:
+        clean_ref = _require_non_empty(external_ref, "external_ref")
+        self._repo.delete_travel_overlay_by_external_ref(clean_ref)
+
     def _fetch_kratos_snapshot(self, target_date: date) -> KratosDaySnapshot:
         assert self._kratos_gateway is not None
         try:
@@ -370,10 +453,19 @@ class ScheduleService:
         )
         exceptions = self._repo.list_exceptions_for_date(resolved_date)
         commitments = self._repo.list_commitments(start_date=resolved_date, end_date=resolved_date)
+        travel_overlays = self._repo.list_travel_overlays(
+            start_date=resolved_date, end_date=resolved_date
+        )
 
         kratos_snapshot, eir_vitals = self._fetch_schedule_peers(resolved_date)
         if kratos_snapshot is None:
-            schedule = resolve_day_schedule(resolved_date, grid_blocks, exceptions, commitments)
+            schedule = resolve_day_schedule(
+                resolved_date,
+                grid_blocks,
+                exceptions,
+                commitments,
+                travel_overlays=travel_overlays,
+            )
         else:
             completed_commitments, completed_sessions = build_kratos_completed_commitments(
                 resolved_date,
@@ -386,6 +478,7 @@ class ScheduleService:
                 grid_blocks,
                 exceptions,
                 [*commitments, *completed_commitments],
+                travel_overlays=travel_overlays,
             )
             hydration = evaluate_workout_hydration(
                 resolved_date,

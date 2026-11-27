@@ -16,6 +16,8 @@ from app.domain.models import (
     NowNextState,
     ResolvedSlice,
     SliceKind,
+    TravelOverlay,
+    TravelOverlayMode,
 )
 
 MINUTES_PER_DAY = 1440
@@ -24,6 +26,7 @@ QUIET_HOURS_START_MINUTE = 22 * 60
 QUIET_HOURS_END_MINUTE = 6 * 60 + 30
 MAX_EXTENSION_COUNT = 2
 ALLOWED_EXTEND_MINUTES = (15, 30)
+WORK_GRID_BLOCK_CATEGORIES = frozenset({"work", "deep_work", "focus", "admin"})
 
 
 def _validate_minute_range(start_minute: int, end_minute: int, context: str) -> None:
@@ -106,15 +109,51 @@ def _carve_block(
     ]
 
 
+def _select_effective_travel_overlay(
+    target_date: date,
+    travel_overlays: Sequence[TravelOverlay],
+) -> TravelOverlay | None:
+    covering = [
+        overlay
+        for overlay in travel_overlays
+        if overlay.start_date <= target_date <= overlay.end_date
+    ]
+    if not covering:
+        return None
+    return min(
+        covering,
+        key=lambda overlay: (
+            0 if overlay.mode == TravelOverlayMode.SUPPRESS_ALL_GRID_BLOCKS else 1,
+            overlay.start_date,
+            overlay.end_date,
+            overlay.id,
+        ),
+    )
+
+
+def _grid_block_allowed_under_overlay(
+    block: GridBlock,
+    overlay: TravelOverlay | None,
+) -> bool:
+    if overlay is None:
+        return True
+    if overlay.mode == TravelOverlayMode.SUPPRESS_ALL_GRID_BLOCKS:
+        return False
+    return block.category.strip().lower() in WORK_GRID_BLOCK_CATEGORIES
+
+
 def _resolve_effective_blocks(
     target_date: date,
     grid_blocks: Sequence[GridBlock],
     exceptions_by_block: dict[int, GridException],
+    effective_overlay: TravelOverlay | None = None,
 ) -> list[tuple[GridBlock, int, int, int, str | None]]:
     weekday = target_date.weekday()
     resolved: list[tuple[GridBlock, int, int, int, str | None]] = []
     for block in grid_blocks:
         if not block.active or block.day_of_week != weekday:
+            continue
+        if not _grid_block_allowed_under_overlay(block, effective_overlay):
             continue
         exc = exceptions_by_block.get(block.id)
         if exc and exc.skipped:
@@ -133,8 +172,10 @@ def resolve_day_schedule(
     grid_blocks: Sequence[GridBlock],
     exceptions: Sequence[GridException],
     commitments: Sequence[Commitment],
+    travel_overlays: Sequence[TravelOverlay] = (),
 ) -> DaySchedule:
     """Resolve weekly grid blocks, per-date exceptions, and commitments into a DaySchedule."""
+    effective_overlay = _select_effective_travel_overlay(target_date, travel_overlays)
     exceptions_by_block = {
         exc.grid_block_id: exc for exc in exceptions if exc.target_date == target_date
     }
@@ -144,7 +185,7 @@ def resolve_day_schedule(
 
     slices: list[ResolvedSlice] = []
     for block, eff_start, eff_end, ext_count, notes in _resolve_effective_blocks(
-        target_date, grid_blocks, exceptions_by_block
+        target_date, grid_blocks, exceptions_by_block, effective_overlay
     ):
         slices.extend(_carve_block(block, eff_start, eff_end, ext_count, notes, timed))
 
@@ -175,6 +216,7 @@ def resolve_day_schedule(
         slices=ordered_slices,
         all_day_commitments=all_day,
         timed_commitments=tuple(timed),
+        travel_overlay=effective_overlay,
     )
 
 

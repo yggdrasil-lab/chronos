@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.session import Base, get_db
 from app.domain.ics_exporter import IcsEvent, render_ics_calendar
-from app.domain.models import CommitmentSource, NudgeMode
+from app.domain.models import CommitmentSource, NudgeMode, TravelOverlayMode
 from app.domain.passive_signals import (
     KratosDaySnapshot,
     KratosPlannedDay,
@@ -287,3 +287,77 @@ def test_ics_endpoint_auth_headers_and_kratos_resilience(
         assert ok.headers.get("cache-control") == "no-store"
         assert "BEGIN:VCALENDAR" in ok.text
         assert "END:VCALENDAR" in ok.text
+
+
+def test_ics_service_respects_travel_overlays_for_grid_and_keeps_travel_commitments(
+    test_session_factory: sessionmaker[Session],
+) -> None:
+    ref_date = date(2026, 11, 26)  # Thursday (weekday=3)
+    with test_session_factory() as db:
+        repo = SqlAlchemyScheduleRepository(db)
+        work_block = repo.create_grid_block(
+            title="Deep Work",
+            day_of_week=3,
+            start_minute=540,
+            end_minute=660,
+            category="focus",
+            nudge_mode=NudgeMode.NONE,
+            flexible=False,
+            active=True,
+            notes=None,
+        )
+        health_block = repo.create_grid_block(
+            title="Morning Run",
+            day_of_week=3,
+            start_minute=420,
+            end_minute=480,
+            category="health",
+            nudge_mode=NudgeMode.NONE,
+            flexible=False,
+            active=True,
+            notes=None,
+        )
+        anchor = repo.upsert_commitment_by_source_external_ref(
+            title="Flight NH802",
+            target_date=ref_date,
+            start_minute=720,
+            end_minute=840,
+            all_day=False,
+            source=CommitmentSource.TRAVEL,
+            external_ref="odysseus:tokyo-2027:item:1",
+            nudge_mode=NudgeMode.TWO_STAGE,
+            urgent_quiet_bypass=True,
+            tentative=False,
+            notes="Terminal 1",
+        )
+        repo.upsert_travel_overlay(
+            external_ref="odysseus:tokyo-2027",
+            label="Tokyo Workation",
+            start_date=ref_date,
+            end_date=ref_date,
+            mode=TravelOverlayMode.KEEP_WORK_BLOCKS,
+        )
+
+        service = IcsService(repo, timezone_name="Pacific/Auckland")
+        keep_work_uids = {
+            evt["UID"]
+            for evt in _extract_vevents(service.build_feed(include_grid=True, reference_date=ref_date))
+        }
+        assert f"commitment-{anchor.id}@chronos.local" in keep_work_uids
+        assert f"grid-{work_block.id}-2026-11-26@chronos.local" in keep_work_uids
+        assert f"grid-{health_block.id}-2026-11-26@chronos.local" not in keep_work_uids
+
+        repo.upsert_travel_overlay(
+            external_ref="odysseus:tokyo-2027",
+            label="Tokyo Vacation",
+            start_date=ref_date,
+            end_date=ref_date,
+            mode=TravelOverlayMode.SUPPRESS_ALL_GRID_BLOCKS,
+        )
+        suppress_all_uids = {
+            evt["UID"]
+            for evt in _extract_vevents(service.build_feed(include_grid=True, reference_date=ref_date))
+        }
+        assert f"commitment-{anchor.id}@chronos.local" in suppress_all_uids
+        assert f"grid-{work_block.id}-2026-11-26@chronos.local" not in suppress_all_uids
+        assert f"grid-{health_block.id}-2026-11-26@chronos.local" not in suppress_all_uids

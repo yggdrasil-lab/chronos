@@ -10,6 +10,8 @@ from app.domain.models import (
     CommitmentSource,
     GridBlock,
     NudgeMode,
+    TravelOverlay,
+    TravelOverlayMode,
 )
 from app.domain.push_scheduler import evaluate_due_nudges
 from app.domain.schedule_engine import resolve_day_schedule
@@ -181,3 +183,54 @@ def test_tentative_commitment_never_triggers_push_nudges_until_confirmed() -> No
     confirmed_schedule = resolve_day_schedule(TARGET_MONDAY, [], [], [confirmed])
     assert [n.stage for n in evaluate_due_nudges(confirmed_schedule, 650, set())] == ["pre_end_10m"]
     assert [n.stage for n in evaluate_due_nudges(confirmed_schedule, 660, set())] == ["boundary"]
+
+
+def test_travel_overlay_suppresses_regular_nudges_and_screens_off_but_keeps_urgent_bypass() -> None:
+    work_block = _block(
+        1,
+        title="Deep Work",
+        start_minute=540,
+        end_minute=600,
+        nudge_mode=NudgeMode.TWO_STAGE,
+    )
+    regular_travel = _commitment(
+        30,
+        title="Museum Entry",
+        start_minute=540,
+        end_minute=600,
+        nudge_mode=NudgeMode.TWO_STAGE,
+        urgent_quiet_bypass=False,
+    )
+    urgent_flight = _commitment(
+        31,
+        title="Airport Check-in",
+        start_minute=1300,
+        end_minute=1330,
+        nudge_mode=NudgeMode.TWO_STAGE,
+        urgent_quiet_bypass=True,
+    )
+    overlay = TravelOverlay(
+        id=1,
+        external_ref="odysseus:tokyo-2027",
+        label="Tokyo Trip",
+        start_date=TARGET_MONDAY,
+        end_date=TARGET_MONDAY,
+        mode=TravelOverlayMode.KEEP_WORK_BLOCKS,
+    )
+    schedule = resolve_day_schedule(
+        TARGET_MONDAY,
+        [work_block],
+        [],
+        [regular_travel, urgent_flight],
+        travel_overlays=[overlay],
+    )
+
+    # Regular work block + non-urgent commitment suppressed even during daytime
+    assert evaluate_due_nudges(schedule, 590, set()) == ()
+    assert evaluate_due_nudges(schedule, 600, set()) == ()
+
+    # At 22:00 (1320): screens_off is suppressed during travel, urgent_quiet_bypass still fires
+    at_2200 = evaluate_due_nudges(schedule, 1320, set())
+    assert [(n.source_kind, n.source_id, n.stage) for n in at_2200] == [
+        ("commitment", "31", "pre_end_10m")
+    ]

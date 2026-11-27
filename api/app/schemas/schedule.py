@@ -17,6 +17,8 @@ from app.domain.models import (
     NudgeMode,
     ResolvedSlice,
     SliceKind,
+    TravelOverlay,
+    TravelOverlayMode,
 )
 
 
@@ -114,6 +116,7 @@ class CommitmentCreate(BaseModel):
     urgent_quiet_bypass: bool = False
     tentative: bool = False
     notes: str | None = None
+    upsert_by_external_ref: bool = False
 
 
 class CommitmentUpdate(BaseModel):
@@ -149,6 +152,7 @@ class CommitmentResponse(BaseModel):
     urgent_quiet_bypass: bool = False
     tentative: bool = False
     notes: str | None = None
+    upsert_by_external_ref: bool = False
     has_conflict: bool = False
     read_only: bool = False
 
@@ -244,6 +248,43 @@ class FastingSuggestionResponse(BaseModel):
         return cls.model_validate(suggestion)
 
 
+class TravelModeUpsertRequest(BaseModel):
+    """Request body for activating or clearing a dated travel mode overlay."""
+
+    external_ref: str
+    label: str = ""
+    start_date: date | None = None
+    end_date: date | None = None
+    mode: TravelOverlayMode = TravelOverlayMode.SUPPRESS_ALL_GRID_BLOCKS
+    active: bool = True
+
+
+class TravelOverlayResponse(BaseModel):
+    """Serialized travel mode overlay."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int | None = None
+    external_ref: str
+    label: str
+    start_date: date | None = None
+    end_date: date | None = None
+    mode: TravelOverlayMode
+    active: bool = True
+
+    @classmethod
+    def from_domain(cls, overlay: TravelOverlay) -> "TravelOverlayResponse":
+        return cls(
+            id=overlay.id,
+            external_ref=overlay.external_ref,
+            label=overlay.label,
+            start_date=overlay.start_date,
+            end_date=overlay.end_date,
+            mode=overlay.mode,
+            active=True,
+        )
+
+
 class DayScheduleResponse(BaseModel):
     """Serialized resolved schedule for a single date."""
 
@@ -254,6 +295,7 @@ class DayScheduleResponse(BaseModel):
     has_conflicts: bool
     workout_hydration: DayWorkoutHydrationResponse | None = None
     fasting_suggestion: FastingSuggestionResponse | None = None
+    travel_overlay: TravelOverlayResponse | None = None
 
     @classmethod
     def from_domain(cls, schedule: DaySchedule) -> "DayScheduleResponse":
@@ -275,6 +317,11 @@ class DayScheduleResponse(BaseModel):
             fasting_suggestion=(
                 FastingSuggestionResponse.from_domain(schedule.fasting_suggestion)
                 if schedule.fasting_suggestion is not None
+                else None
+            ),
+            travel_overlay=(
+                TravelOverlayResponse.from_domain(schedule.travel_overlay)
+                if schedule.travel_overlay is not None
                 else None
             ),
         )

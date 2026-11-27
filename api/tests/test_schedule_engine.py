@@ -14,6 +14,8 @@ from app.domain.models import (
     GridException,
     NudgeMode,
     SliceKind,
+    TravelOverlay,
+    TravelOverlayMode,
 )
 from app.domain.schedule_engine import (
     compute_now_next,
@@ -378,3 +380,110 @@ def test_plan_block_extension_trims_flexible_and_enforces_2x_cap() -> None:
     )
     with pytest.raises(ScheduleConflictError, match="2x"):
         plan_block_extension(deep_work, TARGET_MONDAY, 15, [deep_work], [capped])
+
+
+def test_travel_overlay_modes_filter_grid_blocks_and_preserve_commitments() -> None:
+    work_block = GridBlock(
+        id=1,
+        title="Deep Focus",
+        day_of_week=0,
+        start_minute=540,
+        end_minute=660,
+        category="Focus",
+    )
+    admin_block = GridBlock(
+        id=2,
+        title="Inbox Admin",
+        day_of_week=0,
+        start_minute=660,
+        end_minute=720,
+        category="admin",
+    )
+    health_block = GridBlock(
+        id=3,
+        title="Morning Mobility",
+        day_of_week=0,
+        start_minute=420,
+        end_minute=480,
+        category="health",
+    )
+    flight = _commitment(
+        70,
+        title="Flight JL43",
+        start_minute=480,
+        end_minute=540,
+        source=CommitmentSource.TRAVEL,
+    )
+    all_day_trip = _commitment(
+        71,
+        title="Tokyo Day 1",
+        start_minute=None,
+        end_minute=None,
+        all_day=True,
+        source=CommitmentSource.TRAVEL,
+    )
+    keep_work = TravelOverlay(
+        id=10,
+        external_ref="odysseus:tokyo-workation",
+        label="Tokyo Workation",
+        start_date=TARGET_MONDAY,
+        end_date=TARGET_MONDAY,
+        mode=TravelOverlayMode.KEEP_WORK_BLOCKS,
+    )
+    suppress_all = TravelOverlay(
+        id=11,
+        external_ref="odysseus:tokyo-vacation",
+        label="Tokyo Vacation",
+        start_date=TARGET_MONDAY,
+        end_date=TARGET_MONDAY,
+        mode=TravelOverlayMode.SUPPRESS_ALL_GRID_BLOCKS,
+    )
+    future_overlay = TravelOverlay(
+        id=12,
+        external_ref="odysseus:future",
+        label="Future Trip",
+        start_date=date(2026, 12, 1),
+        end_date=date(2026, 12, 5),
+        mode=TravelOverlayMode.SUPPRESS_ALL_GRID_BLOCKS,
+    )
+
+    # Out-of-range overlay leaves all blocks intact
+    normal = resolve_day_schedule(
+        TARGET_MONDAY,
+        [work_block, admin_block, health_block],
+        [],
+        [flight, all_day_trip],
+        travel_overlays=[future_overlay],
+    )
+    assert normal.travel_overlay is None
+    assert [s.source_id for s in normal.slices] == [3, 70, 1, 2]
+
+    # keep_work_blocks keeps Focus + admin, suppresses health, keeps commitments
+    workation = resolve_day_schedule(
+        TARGET_MONDAY,
+        [work_block, admin_block, health_block],
+        [],
+        [flight, all_day_trip],
+        travel_overlays=[keep_work],
+    )
+    assert workation.travel_overlay == keep_work
+    assert [(s.kind, s.source_id) for s in workation.slices] == [
+        (SliceKind.COMMITMENT, 70),
+        (SliceKind.GRID_BLOCK, 1),
+        (SliceKind.GRID_BLOCK, 2),
+    ]
+    assert len(workation.all_day_commitments) == 1
+
+    # Overlapping overlays: suppress_all_grid_blocks takes precedence over keep_work_blocks
+    overlapped = resolve_day_schedule(
+        TARGET_MONDAY,
+        [work_block, admin_block, health_block],
+        [],
+        [flight, all_day_trip],
+        travel_overlays=[keep_work, suppress_all],
+    )
+    assert overlapped.travel_overlay == suppress_all
+    assert [(s.kind, s.source_id) for s in overlapped.slices] == [
+        (SliceKind.COMMITMENT, 70),
+    ]
+    assert len(overlapped.all_day_commitments) == 1

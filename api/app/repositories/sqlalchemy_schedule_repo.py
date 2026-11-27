@@ -15,6 +15,7 @@ from app.db.orm_models import (
     GridBlockORM,
     GridExceptionORM,
     HabitCueORM,
+    TravelOverlayORM,
 )
 from app.domain.models import (
     Commitment,
@@ -26,6 +27,8 @@ from app.domain.models import (
     GridExceptionDraft,
     HabitCue,
     NudgeMode,
+    TravelOverlay,
+    TravelOverlayMode,
 )
 
 
@@ -71,6 +74,17 @@ def _to_commitment(row: CommitmentORM) -> Commitment:
         urgent_quiet_bypass=row.urgent_quiet_bypass,
         tentative=row.tentative,
         notes=row.notes,
+    )
+
+
+def _to_travel_overlay(row: TravelOverlayORM) -> TravelOverlay:
+    return TravelOverlay(
+        id=row.id,
+        external_ref=row.external_ref,
+        label=row.label,
+        start_date=row.start_date,
+        end_date=row.end_date,
+        mode=TravelOverlayMode(row.mode),
     )
 
 
@@ -278,7 +292,12 @@ class SqlAlchemyScheduleRepository:
         return True
 
     def list_commitments(
-        self, *, start_date: date | None = None, end_date: date | None = None
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        source: CommitmentSource | None = None,
+        external_ref_prefix: str | None = None,
     ) -> list[Commitment]:
         stmt = select(CommitmentORM).order_by(
             CommitmentORM.target_date,
@@ -290,6 +309,13 @@ class SqlAlchemyScheduleRepository:
             stmt = stmt.where(CommitmentORM.target_date >= start_date)
         if end_date is not None:
             stmt = stmt.where(CommitmentORM.target_date <= end_date)
+        if source is not None:
+            stmt = stmt.where(CommitmentORM.source == source.value)
+        if external_ref_prefix is not None:
+            stmt = stmt.where(
+                CommitmentORM.external_ref.is_not(None),
+                CommitmentORM.external_ref.startswith(external_ref_prefix, autoescape=True),
+            )
         return [_to_commitment(row) for row in self._db.scalars(stmt).all()]
 
     def get_commitment(self, commitment_id: int) -> Commitment | None:
@@ -379,6 +405,125 @@ class SqlAlchemyScheduleRepository:
 
     def delete_commitment(self, commitment_id: int) -> bool:
         row = self._db.get(CommitmentORM, commitment_id)
+        if row is None:
+            return False
+        self._db.delete(row)
+        self._db.commit()
+        return True
+
+    def upsert_commitment_by_source_external_ref(
+        self,
+        *,
+        title: str,
+        target_date: date,
+        start_minute: int | None,
+        end_minute: int | None,
+        all_day: bool,
+        source: CommitmentSource,
+        external_ref: str,
+        nudge_mode: NudgeMode,
+        urgent_quiet_bypass: bool,
+        tentative: bool = False,
+        notes: str | None,
+    ) -> Commitment:
+        stmt = select(CommitmentORM).where(
+            CommitmentORM.source == source.value,
+            CommitmentORM.external_ref == external_ref,
+        )
+        row = self._db.scalar(stmt)
+        if row is None:
+            return self.create_commitment(
+                title=title,
+                target_date=target_date,
+                start_minute=start_minute,
+                end_minute=end_minute,
+                all_day=all_day,
+                source=source,
+                external_ref=external_ref,
+                nudge_mode=nudge_mode,
+                urgent_quiet_bypass=urgent_quiet_bypass,
+                tentative=tentative,
+                notes=notes,
+            )
+        row.title = title
+        row.target_date = target_date
+        row.start_minute = start_minute
+        row.end_minute = end_minute
+        row.all_day = all_day
+        row.nudge_mode = nudge_mode.value
+        row.urgent_quiet_bypass = urgent_quiet_bypass
+        row.tentative = tentative
+        row.notes = notes
+        self._db.commit()
+        self._db.refresh(row)
+        return _to_commitment(row)
+
+    def delete_commitment_by_source_external_ref(
+        self, source: CommitmentSource, external_ref: str
+    ) -> bool:
+        stmt = select(CommitmentORM).where(
+            CommitmentORM.source == source.value,
+            CommitmentORM.external_ref == external_ref,
+        )
+        row = self._db.scalar(stmt)
+        if row is None:
+            return False
+        self._db.delete(row)
+        self._db.commit()
+        return True
+
+    def list_travel_overlays(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        external_ref: str | None = None,
+    ) -> list[TravelOverlay]:
+        stmt = select(TravelOverlayORM).order_by(
+            TravelOverlayORM.start_date,
+            TravelOverlayORM.end_date,
+            TravelOverlayORM.id,
+        )
+        if start_date is not None:
+            stmt = stmt.where(TravelOverlayORM.end_date >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(TravelOverlayORM.start_date <= end_date)
+        if external_ref is not None:
+            stmt = stmt.where(TravelOverlayORM.external_ref == external_ref)
+        return [_to_travel_overlay(row) for row in self._db.scalars(stmt).all()]
+
+    def upsert_travel_overlay(
+        self,
+        *,
+        external_ref: str,
+        label: str,
+        start_date: date,
+        end_date: date,
+        mode: TravelOverlayMode,
+    ) -> TravelOverlay:
+        stmt = select(TravelOverlayORM).where(TravelOverlayORM.external_ref == external_ref)
+        row = self._db.scalar(stmt)
+        if row is None:
+            row = TravelOverlayORM(
+                external_ref=external_ref,
+                label=label,
+                start_date=start_date,
+                end_date=end_date,
+                mode=mode.value,
+            )
+            self._db.add(row)
+        else:
+            row.label = label
+            row.start_date = start_date
+            row.end_date = end_date
+            row.mode = mode.value
+        self._db.commit()
+        self._db.refresh(row)
+        return _to_travel_overlay(row)
+
+    def delete_travel_overlay_by_external_ref(self, external_ref: str) -> bool:
+        stmt = select(TravelOverlayORM).where(TravelOverlayORM.external_ref == external_ref)
+        row = self._db.scalar(stmt)
         if row is None:
             return False
         self._db.delete(row)
