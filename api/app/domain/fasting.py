@@ -42,6 +42,7 @@ class EirDailyVitalsSnapshot:
     sleep_duration_hours: float | None = None
     sleep_deep_hours: float | None = None
     hrv_ms: float | None = None
+    overnight_hrv_ms: float | None = None
     resting_hr_bpm: int | None = None
 
 
@@ -136,15 +137,20 @@ def _check_green_recovery_vitals(
 ) -> str | None:
     if eir_vitals is None or not eir_vitals.status.available:
         return "Standard 14:10 baseline (Eir recovery vitals unavailable)."
+    effective_hrv = (
+        eir_vitals.overnight_hrv_ms
+        if eir_vitals.overnight_hrv_ms is not None
+        else eir_vitals.hrv_ms
+    )
     if not _is_finite_number(eir_vitals.sleep_duration_hours) or not _is_finite_number(
-        eir_vitals.hrv_ms
+        effective_hrv
     ):
         return "Standard 14:10 baseline (incomplete sleep or HRV vitals)."
     assert eir_vitals.sleep_duration_hours is not None
-    assert eir_vitals.hrv_ms is not None
+    assert effective_hrv is not None
     if eir_vitals.sleep_duration_hours < MIN_GREEN_SLEEP_HOURS:
         return "Standard 14:10 baseline (sleep duration below 7.0h green threshold)."
-    if eir_vitals.hrv_ms < MIN_GREEN_HRV_MS:
+    if effective_hrv < MIN_GREEN_HRV_MS:
         return "Standard 14:10 baseline (HRV below 45ms green threshold)."
     if eir_vitals.sleep_deep_hours is not None and (
         not _is_finite_number(eir_vitals.sleep_deep_hours)

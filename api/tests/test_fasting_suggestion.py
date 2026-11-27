@@ -242,6 +242,92 @@ def test_friday_vitals_thresholds_and_peer_degradation() -> None:
     assert degraded_kratos.is_optional_reset is False
 
 
+def test_friday_overnight_hrv_anchor_ignores_daytime_drift_and_falls_back_when_absent() -> None:
+    post_nap_vitals = EirDailyVitalsSnapshot(
+        status=PeerFetchStatus(available=True),
+        sleep_duration_hours=6.64,
+        sleep_deep_hours=0.84,
+        hrv_ms=50.02,
+        overnight_hrv_ms=42.22,
+    )
+    post_nap_result = evaluate_fasting_suggestion(
+        TARGET_FRIDAY,
+        time(12, 0),
+        kratos_snapshot=FRIDAY_REST_KRATOS,
+        eir_vitals=post_nap_vitals,
+    )
+    assert post_nap_result.protocol == "14:10"
+    assert post_nap_result.is_optional_reset is False
+
+    # Overnight HRV below threshold still blocks 18:6 even when overnight sleep duration is green
+    overnight_low_hrv = EirDailyVitalsSnapshot(
+        status=PeerFetchStatus(available=True),
+        sleep_duration_hours=7.2,
+        sleep_deep_hours=0.84,
+        hrv_ms=50.02,
+        overnight_hrv_ms=42.22,
+    )
+    low_overnight_result = evaluate_fasting_suggestion(
+        TARGET_FRIDAY,
+        time(12, 0),
+        kratos_snapshot=FRIDAY_REST_KRATOS,
+        eir_vitals=overnight_low_hrv,
+    )
+    assert low_overnight_result.protocol == "14:10"
+    assert low_overnight_result.is_optional_reset is False
+
+    # Green overnight HRV preserves Optional 18:6 despite a daytime stress HRV dip
+    green_overnight_daytime_dip = EirDailyVitalsSnapshot(
+        status=PeerFetchStatus(available=True),
+        sleep_duration_hours=7.2,
+        sleep_deep_hours=0.9,
+        hrv_ms=22.0,
+        overnight_hrv_ms=48.0,
+    )
+    green_result = evaluate_fasting_suggestion(
+        TARGET_FRIDAY,
+        time(12, 0),
+        kratos_snapshot=FRIDAY_REST_KRATOS,
+        eir_vitals=green_overnight_daytime_dip,
+    )
+    assert green_result.protocol == "18:6"
+    assert green_result.is_optional_reset is True
+
+    # Legacy Eir payload with overnight_hrv_ms=None falls back to hrv_ms
+    legacy_vitals = EirDailyVitalsSnapshot(
+        status=PeerFetchStatus(available=True),
+        sleep_duration_hours=7.2,
+        sleep_deep_hours=0.9,
+        hrv_ms=48.0,
+        overnight_hrv_ms=None,
+    )
+    legacy_result = evaluate_fasting_suggestion(
+        TARGET_FRIDAY,
+        time(12, 0),
+        kratos_snapshot=FRIDAY_REST_KRATOS,
+        eir_vitals=legacy_vitals,
+    )
+    assert legacy_result.protocol == "18:6"
+    assert legacy_result.is_optional_reset is True
+
+    # Non-finite overnight_hrv_ms must fail closed rather than falling back to hrv_ms
+    nan_overnight = EirDailyVitalsSnapshot(
+        status=PeerFetchStatus(available=True),
+        sleep_duration_hours=7.2,
+        sleep_deep_hours=0.9,
+        hrv_ms=55.0,
+        overnight_hrv_ms=float("nan"),
+    )
+    nan_result = evaluate_fasting_suggestion(
+        TARGET_FRIDAY,
+        time(12, 0),
+        kratos_snapshot=FRIDAY_REST_KRATOS,
+        eir_vitals=nan_overnight,
+    )
+    assert nan_result.protocol == "14:10"
+    assert nan_result.is_optional_reset is False
+
+
 def test_fasting_phase_boundaries_and_now_next_end_of_day() -> None:
     assert evaluate_fasting_phase(time(10, 29), "10:30", "20:30") == "fasting"
     assert evaluate_fasting_phase(time(10, 30), "10:30", "20:30") == "eating"
@@ -279,6 +365,7 @@ def test_http_eir_gateway_fetch_daily_vitals_happy_404_and_degradation() -> None
                     "sleep_duration_hours": "7.8",
                     "sleep_deep_hours": 1.25,
                     "hrv_ms": 51,
+                    "overnight_hrv_ms": "47.5",
                     "resting_hr_bpm": "56",
                 },
             )
@@ -292,7 +379,27 @@ def test_http_eir_gateway_fetch_daily_vitals_happy_404_and_degradation() -> None
     assert ok.sleep_duration_hours == 7.8
     assert ok.sleep_deep_hours == 1.25
     assert ok.hrv_ms == 51.0
+    assert ok.overnight_hrv_ms == 47.5
     assert ok.resting_hr_bpm == 56
+
+    legacy_ok = HttpEirGateway(
+        base_url="http://eir-api:8000",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _req: httpx.Response(
+                    200,
+                    json={
+                        "sleep_duration_hours": 7.4,
+                        "hrv_ms": 49.0,
+                    },
+                )
+            ),
+            base_url="http://eir-api:8000",
+        ),
+    ).fetch_daily_vitals(TARGET_FRIDAY)
+    assert legacy_ok.status.available is True
+    assert legacy_ok.hrv_ms == 49.0
+    assert legacy_ok.overnight_hrv_ms is None
 
     not_found = HttpEirGateway(
         base_url="http://eir-api:8000",

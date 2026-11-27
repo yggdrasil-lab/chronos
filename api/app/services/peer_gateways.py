@@ -185,6 +185,7 @@ class HttpEirGateway:
             sleep_duration_hours=_coerce_optional_float(payload.get("sleep_duration_hours")),
             sleep_deep_hours=_coerce_optional_float(payload.get("sleep_deep_hours")),
             hrv_ms=_coerce_optional_float(payload.get("hrv_ms")),
+            overnight_hrv_ms=_coerce_optional_float(payload.get("overnight_hrv_ms")),
             resting_hr_bpm=_coerce_optional_int(payload.get("resting_hr_bpm")),
         )
 
