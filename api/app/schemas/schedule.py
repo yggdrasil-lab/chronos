@@ -3,9 +3,10 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.fasting import FastingPhase, FastingProtocol, FastingSuggestion
+from app.domain.sleep_recovery import NapRecoveryBlock, SleepPressureNudge
 from app.domain.models import (
     Commitment,
     CommitmentSource,
@@ -248,6 +249,39 @@ class FastingSuggestionResponse(BaseModel):
         return cls.model_validate(suggestion)
 
 
+class NapRecoveryBlockResponse(BaseModel):
+    """Serialized Eir daytime nap recovery block (non-carving overlay)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    start_at: str
+    end_at: str
+    start_minute: int
+    end_minute: int
+    duration_hours: float
+
+    @classmethod
+    def from_domain(cls, nap: NapRecoveryBlock) -> "NapRecoveryBlockResponse":
+        return cls.model_validate(nap)
+
+
+class SleepPressureNudgeResponse(BaseModel):
+    """Serialized deterministic evening sleep-pressure guidance."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    triggered: bool
+    reason: str
+    suggestion: str
+    latest_nap_end: str
+    total_nap_hours: float
+    nap_count: int
+
+    @classmethod
+    def from_domain(cls, nudge: SleepPressureNudge) -> "SleepPressureNudgeResponse":
+        return cls.model_validate(nudge)
+
+
 class TravelModeUpsertRequest(BaseModel):
     """Request body for activating or clearing a dated travel mode overlay."""
 
@@ -296,6 +330,8 @@ class DayScheduleResponse(BaseModel):
     workout_hydration: DayWorkoutHydrationResponse | None = None
     fasting_suggestion: FastingSuggestionResponse | None = None
     travel_overlay: TravelOverlayResponse | None = None
+    naps: list[NapRecoveryBlockResponse] = Field(default_factory=list)
+    sleep_pressure_nudge: SleepPressureNudgeResponse | None = None
 
     @classmethod
     def from_domain(cls, schedule: DaySchedule) -> "DayScheduleResponse":
@@ -324,6 +360,12 @@ class DayScheduleResponse(BaseModel):
                 if schedule.travel_overlay is not None
                 else None
             ),
+            naps=[NapRecoveryBlockResponse.from_domain(n) for n in schedule.naps],
+            sleep_pressure_nudge=(
+                SleepPressureNudgeResponse.from_domain(schedule.sleep_pressure_nudge)
+                if schedule.sleep_pressure_nudge is not None
+                else None
+            ),
         )
 
 
@@ -339,6 +381,7 @@ class NowNextResponse(BaseModel):
     is_quiet_hours: bool
     workout_hydration: DayWorkoutHydrationResponse | None = None
     fasting_suggestion: FastingSuggestionResponse | None = None
+    sleep_pressure_nudge: SleepPressureNudgeResponse | None = None
 
     @classmethod
     def from_domain(cls, state: NowNextState) -> "NowNextResponse":
@@ -362,6 +405,11 @@ class NowNextResponse(BaseModel):
             fasting_suggestion=(
                 FastingSuggestionResponse.from_domain(state.fasting_suggestion)
                 if state.fasting_suggestion is not None
+                else None
+            ),
+            sleep_pressure_nudge=(
+                SleepPressureNudgeResponse.from_domain(state.sleep_pressure_nudge)
+                if state.sleep_pressure_nudge is not None
                 else None
             ),
         )

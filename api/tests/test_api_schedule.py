@@ -2,6 +2,8 @@
 
 from collections.abc import Generator
 
+from datetime import date
+
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import create_engine, event
@@ -9,7 +11,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.session import Base, get_db
+from app.domain.fasting import EirDailyVitalsSnapshot
+from app.domain.passive_signals import PeerFetchStatus
+from app.domain.sleep_recovery import EirNapRecord
 from app.main import app
+from app.routers import deps
 
 
 @pytest.fixture()
@@ -246,3 +252,75 @@ def test_commitments_and_schedule_endpoints(client: TestClient) -> None:
 
     assert client.delete(f"/commitments/{c1_id}").status_code == 204
     assert client.delete(f"/commitments/{c1_id}").status_code == 404
+
+
+def test_schedule_day_and_now_next_expose_naps_without_carving_or_conflicts(
+    client: TestClient,
+) -> None:
+    class _NapEirVitalsGateway:
+        def fetch_daily_vitals(self, target_date: date) -> EirDailyVitalsSnapshot:
+            del target_date
+            return EirDailyVitalsSnapshot(
+                status=PeerFetchStatus(available=True),
+                sleep_duration_hours=6.64,
+                nap_duration_hours=2.18,
+                nap_count=1,
+                naps=(
+                    EirNapRecord(
+                        start_at="2026-11-26T16:29:00+13:00",
+                        end_at="2026-11-26T18:39:00+13:00",
+                        duration_hours=2.18,
+                    ),
+                ),
+            )
+
+    app.dependency_overrides[deps.get_eir_vitals_gateway] = _NapEirVitalsGateway
+    client.post(
+        "/weekly-grid/blocks",
+        json={
+            "title": "Deep Work",
+            "day_of_week": 3,
+            "start_minute": 960,
+            "end_minute": 1140,
+            "category": "focus",
+        },
+    )
+    client.post(
+        "/commitments",
+        json={
+            "title": "Evening Sync",
+            "target_date": "2026-11-26",
+            "start_minute": 1020,
+            "end_minute": 1080,
+        },
+    )
+
+    day_resp = client.get("/schedule/day", params={"target_date": "2026-11-26"})
+    assert day_resp.status_code == 200
+    day_data = day_resp.json()
+    assert day_data["has_conflicts"] is False
+    assert [(s["start_minute"], s["end_minute"]) for s in day_data["slices"]] == [
+        (960, 1020),
+        (1020, 1080),
+        (1080, 1140),
+    ]
+    assert len(day_data["naps"]) == 1
+    assert day_data["naps"][0]["start_minute"] == 989
+    assert day_data["naps"][0]["end_minute"] == 1119
+    assert day_data["naps"][0]["duration_hours"] == 2.18
+    assert day_data["sleep_pressure_nudge"] == {
+        "triggered": True,
+        "reason": "Late 2.2h nap ending 18:39 may delay evening sleep onset.",
+        "suggestion": "Keep 22:00 screens-off calm, avoid forcing early sleep, and dim lights until drowsy.",
+        "latest_nap_end": "18:39",
+        "total_nap_hours": 2.18,
+        "nap_count": 1,
+    }
+    assert day_data["fasting_suggestion"]["protocol"] == "14:10"
+
+    now_resp = client.get(
+        "/schedule/now-next", params={"target_date": "2026-11-26", "now_minute": 1200}
+    )
+    assert now_resp.status_code == 200
+    now_data = now_resp.json()
+    assert now_data["sleep_pressure_nudge"] == day_data["sleep_pressure_nudge"]

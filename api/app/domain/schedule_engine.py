@@ -277,6 +277,7 @@ def compute_now_next(schedule: DaySchedule, now_minute: int) -> NowNextState:
         is_quiet_hours=is_quiet_hours,
         workout_hydration=schedule.workout_hydration,
         fasting_suggestion=fasting,
+        sleep_pressure_nudge=schedule.sleep_pressure_nudge,
     )
 
 

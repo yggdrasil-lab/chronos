@@ -432,7 +432,7 @@ def test_http_eir_gateway_fetch_daily_vitals_happy_404_and_degradation() -> None
     assert HttpEirGateway(base_url="").fetch_daily_vitals(TARGET_FRIDAY).status.available is False
 
 
-def test_schedule_service_skips_eir_on_non_friday_and_runs_concurrently_on_friday() -> None:
+def test_schedule_service_fetches_eir_daily_and_preserves_non_friday_baseline() -> None:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -449,8 +449,9 @@ def test_schedule_service_skips_eir_on_non_friday_and_runs_concurrently_on_frida
         thursday_schedule = service.get_day_schedule(TARGET_THURSDAY)
         assert thursday_schedule.fasting_suggestion is not None
         assert thursday_schedule.fasting_suggestion.protocol == "14:10"
+        assert thursday_schedule.fasting_suggestion.is_optional_reset is False
         assert kratos_calls == [TARGET_THURSDAY]
-        assert eir_calls == []
+        assert eir_calls == [TARGET_THURSDAY]
 
     barrier = threading.Barrier(2, timeout=2.0)
 

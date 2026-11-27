@@ -113,6 +113,7 @@ def build_push_service(db: Session) -> PushService:
         gateway=gateway,
         vapid_public_key=settings.vapid_public_key,
         timezone_name=settings.timezone,
+        eir_vitals_gateway=get_eir_vitals_gateway(),
     )
 
 
