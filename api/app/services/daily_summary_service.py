@@ -24,7 +24,10 @@ from app.schemas.integrations import (
     DailySummaryResponse,
     DailySummaryWorkoutHydration,
 )
-from app.schemas.schedule import CompletedKratosSessionResponse
+from app.schemas.schedule import (
+    CompletedKratosSessionResponse,
+    FastingSuggestionResponse,
+)
 from app.services.cue_service import CueService
 from app.services.passive_signal_service import PassiveSignalService
 from app.services.schedule_service import ScheduleService
@@ -201,6 +204,11 @@ class DailySummaryService:
             conflict_count=sum(1 for item in commitments if item.has_conflict),
             grid_exceptions=[_to_summary_exception(exc) for exc in exceptions],
             workout_hydration=_to_summary_hydration(day_schedule, resolved_date),
+            fasting_suggestion=(
+                FastingSuggestionResponse.from_domain(day_schedule.fasting_suggestion)
+                if day_schedule.fasting_suggestion is not None
+                else None
+            ),
             yesterday_friction_notes=[
                 _to_summary_friction_note(note) for note in yesterday_notes
             ],

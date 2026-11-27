@@ -4,10 +4,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
 import logging
+import math
 from typing import Any, Protocol
 
 import httpx
 
+from app.domain.fasting import EirDailyVitalsSnapshot
 from app.domain.passive_signals import (
     EirDaySnapshot,
     EirDetectedWorkout,
@@ -26,6 +28,12 @@ class EirGateway(Protocol):
     """Port for fetching Eir daily biometric and workout snapshots."""
 
     def fetch_day_snapshot(self, target_date: date) -> EirDaySnapshot: ...
+
+
+class EirVitalsGateway(Protocol):
+    """Narrow port for fetching Eir daily recovery vitals."""
+
+    def fetch_daily_vitals(self, target_date: date) -> EirDailyVitalsSnapshot: ...
 
 
 class KratosGateway(Protocol):
@@ -58,6 +66,35 @@ def _get_json(client: httpx.Client, path: str, *, allow_404: bool = False) -> An
     if response.status_code != 200:
         raise ValueError(f"Unexpected status {response.status_code} from {path}")
     return response.json()
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(round(value)) if math.isfinite(value) else None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        try:
+            return int(cleaned)
+        except ValueError:
+            parsed = _coerce_optional_float(cleaned)
+            return int(round(parsed)) if parsed is not None else None
+    return None
 
 
 class HttpEirGateway:
@@ -118,6 +155,37 @@ class HttpEirGateway:
             latest_measured_at=latest_measured_at,
             latest_weight_kg=latest_weight_kg,
             detected_workouts=detected,
+        )
+
+    def fetch_daily_vitals(self, target_date: date) -> EirDailyVitalsSnapshot:
+        if not self._base_url and self._client is None:
+            return EirDailyVitalsSnapshot(
+                status=PeerFetchStatus(available=False, error="Eir URL unset")
+            )
+        try:
+            with _client_scope(self._base_url, self._timeout_seconds, self._client) as client:
+                payload = _get_json(
+                    client,
+                    f"/biometrics/daily/{target_date.isoformat()}",
+                    allow_404=True,
+                )
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            logger.warning("Eir daily vitals fetch degraded: %s", exc)
+            return EirDailyVitalsSnapshot(status=PeerFetchStatus(available=False, error=str(exc)))
+
+        if payload is None:
+            return EirDailyVitalsSnapshot(status=PeerFetchStatus(available=True))
+        if not isinstance(payload, dict):
+            return EirDailyVitalsSnapshot(
+                status=PeerFetchStatus(available=False, error="Invalid Eir daily vitals payload")
+            )
+
+        return EirDailyVitalsSnapshot(
+            status=PeerFetchStatus(available=True),
+            sleep_duration_hours=_coerce_optional_float(payload.get("sleep_duration_hours")),
+            sleep_deep_hours=_coerce_optional_float(payload.get("sleep_deep_hours")),
+            hrv_ms=_coerce_optional_float(payload.get("hrv_ms")),
+            resting_hr_bpm=_coerce_optional_int(payload.get("resting_hr_bpm")),
         )
 
 

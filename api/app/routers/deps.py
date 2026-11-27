@@ -22,6 +22,7 @@ from app.services.ics_service import IcsService
 from app.services.passive_signal_service import PassiveSignalService
 from app.services.peer_gateways import (
     EirGateway,
+    EirVitalsGateway,
     HttpEirGateway,
     HttpKratosGateway,
     HttpPlutusGateway,
@@ -35,6 +36,14 @@ from app.services.schedule_service import ScheduleService
 
 def get_eir_gateway() -> EirGateway:
     """Construct the Eir peer gateway using runtime settings."""
+    return HttpEirGateway(
+        base_url=settings.eir_base_url,
+        timeout_seconds=settings.peer_timeout_seconds,
+    )
+
+
+def get_eir_vitals_gateway() -> EirVitalsGateway:
+    """Construct the Eir daily vitals gateway using runtime settings."""
     return HttpEirGateway(
         base_url=settings.eir_base_url,
         timeout_seconds=settings.peer_timeout_seconds,
@@ -60,12 +69,14 @@ def get_plutus_gateway() -> PlutusGateway:
 def get_schedule_service(
     db: Session = Depends(get_db),
     kratos_gateway: KratosGateway = Depends(get_kratos_gateway),
+    eir_vitals_gateway: EirVitalsGateway = Depends(get_eir_vitals_gateway),
 ) -> ScheduleService:
     """Construct a ScheduleService backed by the request's SQLAlchemy session."""
     return ScheduleService(
         SqlAlchemyScheduleRepository(db),
         timezone_name=settings.timezone,
         kratos_gateway=kratos_gateway,
+        eir_vitals_gateway=eir_vitals_gateway,
     )
 
 

@@ -214,6 +214,10 @@ def test_schedule_day_and_now_next_kratos_workout_hydration(client: TestClient) 
     day_resp = client.get("/schedule/day", params={"target_date": "2026-11-23"})
     assert day_resp.status_code == 200
     day_data = day_resp.json()
+    assert day_data["fasting_suggestion"]["protocol"] == "14:10"
+    assert day_data["fasting_suggestion"]["window_start"] == "10:30"
+    assert day_data["fasting_suggestion"]["window_end"] == "20:30"
+    assert day_data["fasting_suggestion"]["is_optional_reset"] is False
     hydration = day_data["workout_hydration"]
     assert hydration["peer_degraded"] is False
     assert hydration["planned_workout"]["placement"] == "grid_block"
@@ -239,6 +243,8 @@ def test_schedule_day_and_now_next_kratos_workout_hydration(client: TestClient) 
     now_data = now_resp.json()
     assert now_data["active_slice"]["hydrated_workout"]["title"] == "Upper A"
     assert now_data["workout_hydration"]["planned_workout"]["attached_grid_block_id"] == block_id
+    assert now_data["fasting_suggestion"]["protocol"] == "14:10"
+    assert now_data["fasting_suggestion"]["phase"] == "eating"
 
     # Peer degradation still returns 200 with peer_degraded=True
     app.dependency_overrides[get_kratos_gateway] = lambda: _StubKratosGateway(

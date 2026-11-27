@@ -5,7 +5,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.schedule import CommitmentResponse, CompletedKratosSessionResponse
+from app.schemas.schedule import (
+    CommitmentResponse,
+    CompletedKratosSessionResponse,
+    FastingSuggestionResponse,
+)
 
 
 class EmailAttachmentPayload(BaseModel):
@@ -133,6 +137,7 @@ class DailySummaryResponse(BaseModel):
     conflict_count: int
     grid_exceptions: list[DailySummaryGridException]
     workout_hydration: DailySummaryWorkoutHydration | None = None
+    fasting_suggestion: FastingSuggestionResponse | None = None
     yesterday_friction_notes: list[DailySummaryFrictionNote]
     yesterday_passive_signals: list[DailySummaryPassiveSignal]
     degraded_peers: list[str]

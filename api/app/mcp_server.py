@@ -31,7 +31,7 @@ from app.repositories.sqlalchemy_schedule_repo import (
     SqlAlchemyHabitCueRepo,
     SqlAlchemyScheduleRepository,
 )
-from app.routers.deps import get_kratos_gateway
+from app.routers.deps import get_eir_vitals_gateway, get_kratos_gateway
 from app.schemas.cues import FrictionNoteResponse, WeeklyReflectionResponse
 from app.schemas.schedule import (
     CommitmentResponse,
@@ -39,11 +39,12 @@ from app.schemas.schedule import (
     NowNextResponse,
 )
 from app.services.cue_service import CueService
-from app.services.peer_gateways import KratosGateway
+from app.services.peer_gateways import EirVitalsGateway, KratosGateway
 from app.services.schedule_service import ScheduleService
 
 SessionOpener = Callable[[], contextlib.AbstractContextManager[Session]]
 KratosGetter = Callable[[], KratosGateway]
+EirVitalsGetter = Callable[[], EirVitalsGateway]
 
 
 def _extract_authorization_header(scope: Scope) -> str:
@@ -131,11 +132,16 @@ def _parse_required_date(raw: str, field_name: str) -> date:
     return parsed
 
 
-def _build_schedule_service(db: Session, get_kratos: KratosGetter) -> ScheduleService:
+def _build_schedule_service(
+    db: Session,
+    get_kratos: KratosGetter,
+    get_eir_vitals: EirVitalsGetter | None = None,
+) -> ScheduleService:
     return ScheduleService(
         SqlAlchemyScheduleRepository(db),
         timezone_name=settings.timezone,
         kratos_gateway=get_kratos(),
+        eir_vitals_gateway=get_eir_vitals() if get_eir_vitals is not None else None,
     )
 
 
@@ -147,6 +153,7 @@ def _register_schedule_read_tools(
     server: MCPServer,
     open_session: SessionOpener,
     get_kratos: KratosGetter,
+    get_eir_vitals: EirVitalsGetter | None = None,
 ) -> None:
     @server.tool(
         name="get_today_now_next",
@@ -156,9 +163,9 @@ def _register_schedule_read_tools(
         with _tool_errors():
             parsed_date = _parse_optional_date(target_date, "target_date")
             with open_session() as db:
-                state = _build_schedule_service(db, get_kratos).get_now_next(
-                    target_date=parsed_date
-                )
+                state = _build_schedule_service(
+                    db, get_kratos, get_eir_vitals
+                ).get_now_next(target_date=parsed_date)
             return NowNextResponse.from_domain(state).model_dump(mode="json")
 
     @server.tool(
@@ -169,9 +176,9 @@ def _register_schedule_read_tools(
         with _tool_errors():
             parsed_date = _parse_optional_date(target_date, "target_date")
             with open_session() as db:
-                schedule = _build_schedule_service(db, get_kratos).get_day_schedule(
-                    target_date=parsed_date
-                )
+                schedule = _build_schedule_service(
+                    db, get_kratos, get_eir_vitals
+                ).get_day_schedule(target_date=parsed_date)
             return DayScheduleResponse.from_domain(schedule).model_dump(mode="json")
 
 
@@ -264,6 +271,7 @@ def _register_weekly_summary_tool(server: MCPServer, open_session: SessionOpener
 def build_mcp_server(
     open_session: SessionOpener,
     get_kratos: KratosGetter,
+    get_eir_vitals: EirVitalsGetter | None = None,
 ) -> MCPServer:
     """Construct the Chronos MCPServer exposing strictly the 5 Spec tools."""
     server = MCPServer(
@@ -275,7 +283,7 @@ def build_mcp_server(
             "friction summaries. Weekly grid templates are never modified via MCP."
         ),
     )
-    _register_schedule_read_tools(server, open_session, get_kratos)
+    _register_schedule_read_tools(server, open_session, get_kratos, get_eir_vitals)
     _register_commitment_write_tool(server, open_session, get_kratos)
     _register_log_friction_tool(server, open_session)
     _register_weekly_summary_tool(server, open_session)
@@ -322,7 +330,13 @@ def install_mcp(app: FastAPI) -> None:
         provider = app.dependency_overrides.get(get_kratos_gateway, get_kratos_gateway)
         return provider()
 
-    server = build_mcp_server(_open_session, _get_kratos)
+    def _get_eir_vitals() -> EirVitalsGateway:
+        provider = app.dependency_overrides.get(
+            get_eir_vitals_gateway, get_eir_vitals_gateway
+        )
+        return provider()
+
+    server = build_mcp_server(_open_session, _get_kratos, _get_eir_vitals)
     holder = _RebuildableApp(server)
 
     app.router.routes.append(Route("/mcp", endpoint=holder))

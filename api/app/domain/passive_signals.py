@@ -8,6 +8,7 @@ import re
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from app.domain.fasting import WEEKDAY_SHORT_NAMES, match_planned_day
 from app.domain.models import (
     Commitment,
     CommitmentSource,
@@ -39,7 +40,6 @@ RULE_LABELS: dict[str, str] = {
 WORKOUT_TITLE_WORDS = frozenset(
     {"workout", "workouts", "gym", "lift", "lifting", "swim", "swimming", "training"}
 )
-WEEKDAY_SHORT_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 DEFAULT_TIMEZONE = ZoneInfo("Pacific/Auckland")
 MIN_FASTED_WALK_MINUTES = 40
 PLUTUS_FRESHNESS_DAYS = 31
@@ -475,24 +475,7 @@ def build_kratos_completed_commitments(
     return tuple(commitments), completed
 
 
-def _match_planned_day(
-    target_date: date, planned_days: Sequence[KratosPlannedDay]
-) -> KratosPlannedDay | None:
-    weekday = target_date.weekday()
-    short_name = WEEKDAY_SHORT_NAMES[weekday].lower()
-    for index, entry in enumerate(planned_days):
-        day_label = (_clean_text(entry.day) or "").lower()
-        if day_label:
-            if day_label == short_name or day_label[:3] == short_name:
-                return entry
-            continue
-        if entry.day_index is not None:
-            if entry.day_index == weekday:
-                return entry
-            continue
-        if index == weekday:
-            return entry
-    return None
+_match_planned_day = match_planned_day
 
 
 def _find_matching_workout_block_id(schedule: DaySchedule) -> int | None:
