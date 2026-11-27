@@ -269,6 +269,8 @@ def test_daily_summary_full_payload_and_peer_timeout_resilience(
         assert hydration["planned_routine_name"] == "Upper Push A"
         assert hydration["planned_day_of_week"] == "Thu"
         assert hydration["attached_grid_block_id"] == workout_block.id
+        assert body["fasting_suggestion"]["protocol"] == "14:10"
+        assert body["fasting_suggestion"]["is_optional_reset"] is False
 
         assert len(body["yesterday_friction_notes"]) == 1
         assert body["yesterday_friction_notes"][0]["tag"] == "schedule_overrun"

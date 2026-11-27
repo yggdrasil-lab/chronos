@@ -1,5 +1,7 @@
 """Application service layer coordinating validation, persistence, and schedule resolution."""
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import date, datetime
 import logging
 from zoneinfo import ZoneInfo
@@ -7,6 +9,11 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.domain.errors import EntityNotFoundError, ScheduleValidationError
+from app.domain.fasting import (
+    FRIDAY_WEEKDAY,
+    EirDailyVitalsSnapshot,
+    evaluate_fasting_suggestion,
+)
 from app.domain.models import (
     Commitment,
     CommitmentSource,
@@ -30,7 +37,7 @@ from app.domain.schedule_engine import (
     resolve_day_schedule,
 )
 from app.repositories.protocols import ScheduleRepository
-from app.services.peer_gateways import KratosGateway
+from app.services.peer_gateways import EirVitalsGateway, KratosGateway
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +85,12 @@ class ScheduleService:
         repo: ScheduleRepository,
         timezone_name: str = "Pacific/Auckland",
         kratos_gateway: KratosGateway | None = None,
+        eir_vitals_gateway: EirVitalsGateway | None = None,
     ) -> None:
         self._repo = repo
         self._tz = ZoneInfo(timezone_name)
         self._kratos_gateway = kratos_gateway
+        self._eir_vitals_gateway = eir_vitals_gateway
 
     def list_grid_blocks(
         self, *, day_of_week: int | None = None, active_only: bool = False
@@ -323,37 +332,77 @@ class ScheduleService:
             logger.warning("Kratos gateway exception during schedule resolution: %s", exc)
             return KratosDaySnapshot(status=PeerFetchStatus(available=False, error=str(exc)))
 
+    def _fetch_eir_daily_vitals(self, target_date: date) -> EirDailyVitalsSnapshot:
+        assert self._eir_vitals_gateway is not None
+        try:
+            return self._eir_vitals_gateway.fetch_daily_vitals(target_date)
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            logger.warning("Eir vitals gateway exception during schedule resolution: %s", exc)
+            return EirDailyVitalsSnapshot(
+                status=PeerFetchStatus(available=False, error=str(exc))
+            )
+
+    def _fetch_schedule_peers(
+        self, resolved_date: date
+    ) -> tuple[KratosDaySnapshot | None, EirDailyVitalsSnapshot | None]:
+        is_friday = resolved_date.weekday() == FRIDAY_WEEKDAY
+        if not is_friday or self._eir_vitals_gateway is None:
+            kratos = (
+                self._fetch_kratos_snapshot(resolved_date)
+                if self._kratos_gateway is not None
+                else None
+            )
+            return kratos, None
+
+        if self._kratos_gateway is None:
+            return None, self._fetch_eir_daily_vitals(resolved_date)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            kratos_future = executor.submit(self._fetch_kratos_snapshot, resolved_date)
+            eir_future = executor.submit(self._fetch_eir_daily_vitals, resolved_date)
+            return kratos_future.result(), eir_future.result()
+
     def get_day_schedule(self, target_date: date | None = None) -> DaySchedule:
-        resolved_date = target_date or datetime.now(self._tz).date()
+        now_dt = datetime.now(self._tz)
+        resolved_date = target_date or now_dt.date()
         grid_blocks = self._repo.list_grid_blocks(
             day_of_week=resolved_date.weekday(), active_only=True
         )
         exceptions = self._repo.list_exceptions_for_date(resolved_date)
         commitments = self._repo.list_commitments(start_date=resolved_date, end_date=resolved_date)
-        if self._kratos_gateway is None:
-            return resolve_day_schedule(resolved_date, grid_blocks, exceptions, commitments)
 
-        kratos_snapshot = self._fetch_kratos_snapshot(resolved_date)
-        completed_commitments, completed_sessions = build_kratos_completed_commitments(
+        kratos_snapshot, eir_vitals = self._fetch_schedule_peers(resolved_date)
+        if kratos_snapshot is None:
+            schedule = resolve_day_schedule(resolved_date, grid_blocks, exceptions, commitments)
+        else:
+            completed_commitments, completed_sessions = build_kratos_completed_commitments(
+                resolved_date,
+                kratos_snapshot,
+                existing_commitments=commitments,
+                tz=self._tz,
+            )
+            base_schedule = resolve_day_schedule(
+                resolved_date,
+                grid_blocks,
+                exceptions,
+                [*commitments, *completed_commitments],
+            )
+            hydration = evaluate_workout_hydration(
+                resolved_date,
+                kratos_snapshot,
+                base_schedule,
+                completed_sessions=completed_sessions,
+                tz=self._tz,
+            )
+            schedule = attach_workout_hydration_to_schedule(base_schedule, hydration)
+
+        fasting = evaluate_fasting_suggestion(
             resolved_date,
-            kratos_snapshot,
-            existing_commitments=commitments,
-            tz=self._tz,
+            now_dt.time(),
+            kratos_snapshot=kratos_snapshot,
+            eir_vitals=eir_vitals,
         )
-        schedule = resolve_day_schedule(
-            resolved_date,
-            grid_blocks,
-            exceptions,
-            [*commitments, *completed_commitments],
-        )
-        hydration = evaluate_workout_hydration(
-            resolved_date,
-            kratos_snapshot,
-            schedule,
-            completed_sessions=completed_sessions,
-            tz=self._tz,
-        )
-        return attach_workout_hydration_to_schedule(schedule, hydration)
+        return replace(schedule, fasting_suggestion=fasting)
 
     def get_now_next(
         self, target_date: date | None = None, now_minute: int | None = None

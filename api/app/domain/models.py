@@ -1,9 +1,14 @@
 """Pure immutable domain models for Chronos schedule resolution."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from app.domain.fasting import FastingSuggestion
 
 
 class NudgeMode(str, Enum):
@@ -176,6 +181,7 @@ class DaySchedule:
     all_day_commitments: tuple[Commitment, ...]
     timed_commitments: tuple[Commitment, ...]
     workout_hydration: DayWorkoutHydration | None = None
+    fasting_suggestion: FastingSuggestion | None = None
 
     @property
     def has_conflicts(self) -> bool:
@@ -195,6 +201,7 @@ class NowNextState:
     open_time_minutes: int | None
     is_quiet_hours: bool
     workout_hydration: DayWorkoutHydration | None = None
+    fasting_suggestion: FastingSuggestion | None = None
 
 
 @dataclass(frozen=True)

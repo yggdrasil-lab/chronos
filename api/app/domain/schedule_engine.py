@@ -2,9 +2,10 @@
 
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import date
+from datetime import date, time
 
 from app.domain.errors import ScheduleConflictError, ScheduleValidationError
+from app.domain.fasting import evaluate_fasting_phase
 from app.domain.models import (
     Commitment,
     DaySchedule,
@@ -177,6 +178,13 @@ def resolve_day_schedule(
     )
 
 
+def _time_from_minute(now_minute: int) -> time:
+    if now_minute == MINUTES_PER_DAY:
+        return time(23, 59, 59)
+    hour, minute = divmod(now_minute, 60)
+    return time(hour, minute)
+
+
 def compute_now_next(schedule: DaySchedule, now_minute: int) -> NowNextState:
     """Compute active items, upcoming slices, open time, and quiet-hours flag."""
     if now_minute < 0 or now_minute > MINUTES_PER_DAY:
@@ -206,6 +214,17 @@ def compute_now_next(schedule: DaySchedule, now_minute: int) -> NowNextState:
     else:
         open_time_minutes = MINUTES_PER_DAY - now_minute
 
+    fasting = schedule.fasting_suggestion
+    if fasting is not None:
+        fasting = replace(
+            fasting,
+            phase=evaluate_fasting_phase(
+                _time_from_minute(now_minute),
+                fasting.window_start,
+                fasting.window_end,
+            ),
+        )
+
     return NowNextState(
         target_date=schedule.target_date,
         now_minute=now_minute,
@@ -215,6 +234,7 @@ def compute_now_next(schedule: DaySchedule, now_minute: int) -> NowNextState:
         open_time_minutes=open_time_minutes,
         is_quiet_hours=is_quiet_hours,
         workout_hydration=schedule.workout_hydration,
+        fasting_suggestion=fasting,
     )
 
 

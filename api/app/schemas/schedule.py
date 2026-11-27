@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from app.domain.fasting import FastingPhase, FastingProtocol, FastingSuggestion
 from app.domain.models import (
     Commitment,
     CommitmentSource,
@@ -226,6 +227,23 @@ class ResolvedSliceResponse(BaseModel):
         return cls.model_validate(item)
 
 
+class FastingSuggestionResponse(BaseModel):
+    """Serialized deterministic fasting window and live phase suggestion."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    protocol: FastingProtocol
+    window_start: str
+    window_end: str
+    phase: FastingPhase
+    is_optional_reset: bool
+    reason: str
+
+    @classmethod
+    def from_domain(cls, suggestion: FastingSuggestion) -> "FastingSuggestionResponse":
+        return cls.model_validate(suggestion)
+
+
 class DayScheduleResponse(BaseModel):
     """Serialized resolved schedule for a single date."""
 
@@ -235,6 +253,7 @@ class DayScheduleResponse(BaseModel):
     timed_commitments: list[CommitmentResponse]
     has_conflicts: bool
     workout_hydration: DayWorkoutHydrationResponse | None = None
+    fasting_suggestion: FastingSuggestionResponse | None = None
 
     @classmethod
     def from_domain(cls, schedule: DaySchedule) -> "DayScheduleResponse":
@@ -253,6 +272,11 @@ class DayScheduleResponse(BaseModel):
                 if schedule.workout_hydration is not None
                 else None
             ),
+            fasting_suggestion=(
+                FastingSuggestionResponse.from_domain(schedule.fasting_suggestion)
+                if schedule.fasting_suggestion is not None
+                else None
+            ),
         )
 
 
@@ -267,6 +291,7 @@ class NowNextResponse(BaseModel):
     open_time_minutes: int | None = None
     is_quiet_hours: bool
     workout_hydration: DayWorkoutHydrationResponse | None = None
+    fasting_suggestion: FastingSuggestionResponse | None = None
 
     @classmethod
     def from_domain(cls, state: NowNextState) -> "NowNextResponse":
@@ -285,6 +310,11 @@ class NowNextResponse(BaseModel):
             workout_hydration=(
                 DayWorkoutHydrationResponse.from_domain(state.workout_hydration)
                 if state.workout_hydration is not None
+                else None
+            ),
+            fasting_suggestion=(
+                FastingSuggestionResponse.from_domain(state.fasting_suggestion)
+                if state.fasting_suggestion is not None
                 else None
             ),
         )
