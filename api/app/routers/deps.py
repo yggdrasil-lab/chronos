@@ -132,6 +132,7 @@ def get_schedule_extractor() -> ScheduleExtractorPort:
             api_key=api_key,
             model=settings.muninn_model,
             timezone_name=settings.timezone,
+            timeout_seconds=settings.muninn_timeout_seconds,
         )
     if settings.environment.strip().lower() == "development" and not api_base:
         return NullScheduleExtractor()
@@ -140,6 +141,7 @@ def get_schedule_extractor() -> ScheduleExtractorPort:
         api_key=api_key,
         model=settings.muninn_model,
         timezone_name=settings.timezone,
+        timeout_seconds=settings.muninn_timeout_seconds,
     )
 
 

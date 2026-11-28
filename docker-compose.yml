@@ -59,6 +59,7 @@ services:
       - CHRONOS_WEBHOOK_SECRET_FILE=/run/secrets/chronos_webhook_secret
       - CHRONOS_MUNINN_API_BASE=http://muninn:4000/v1
       - CHRONOS_MUNINN_MODEL=app-synthesize
+      - CHRONOS_MUNINN_TIMEOUT_SECONDS=60.0
       - CHRONOS_MUNINN_API_KEY_FILE=/run/secrets/chronos_muninn_api_key
       - CHRONOS_ICS_TOKEN_FILE=/run/secrets/chronos_ics_token
       - CHRONOS_MCP_TOKEN_FILE=/run/secrets/chronos_mcp_token
