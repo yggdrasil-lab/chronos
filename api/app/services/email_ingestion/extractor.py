@@ -132,9 +132,7 @@ def _parse_extractor_json(
             notes=notes,
         )
 
-    start_minute, end_minute = _resolve_timed_minutes(
-        parsed.get("start_minute"), parsed.get("end_minute")
-    )
+    start_minute, end_minute = _resolve_timed_minutes(parsed.get("start_minute"), parsed.get("end_minute"))
     return ExtractedScheduleEvent(
         title=raw_title[:200],
         target_date=target_date,
