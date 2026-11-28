@@ -27,6 +27,7 @@ from app.services.email_ingestion import (
     NullScheduleExtractor,
     ScheduleExtractionUpstreamError,
 )
+from app.services.email_ingestion.extractor import _parse_extractor_json
 
 
 class FakeScheduleExtractor:
@@ -400,3 +401,139 @@ def test_get_schedule_extractor_passes_muninn_timeout_seconds(
     fallback = deps.get_schedule_extractor()
     assert isinstance(fallback, MuninnScheduleExtractorAdapter)
     assert fallback._timeout_seconds == 45.0
+
+
+def test_integrations_email_muninn_overnight_flight_clamps_end_minute_end_to_end(
+    test_session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(deps.settings, "environment", "development")
+    monkeypatch.setattr(deps.settings, "webhook_secret", "synthetic-webhook-secret")
+
+    def _muninn_overnight(request: httpx.Request) -> httpx.Response:
+        req_json = json.loads(request.content.decode("utf-8"))
+        system_msg = req_json["messages"][0]["content"]
+        assert "clamp end_minute to 1440" in system_msg
+        payload = {
+            "schedulable": True,
+            "title": "Flight ABC123 AKL to SIN",
+            "target_date": "2026-12-10",
+            "start_minute": 1205,
+            "end_minute": 305,
+            "all_day": False,
+            "notes": "Booked for Alex Tan",
+        }
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(payload)}}]})
+
+    adapter = MuninnScheduleExtractorAdapter(
+        api_base="http://muninn:4000/v1",
+        api_key="muninn-secret",
+        client=httpx.Client(
+            transport=httpx.MockTransport(_muninn_overnight),
+            base_url="http://muninn:4000/v1",
+        ),
+    )
+    app.dependency_overrides[deps.get_schedule_extractor] = lambda: adapter
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/integrations/email",
+            headers={"Authorization": "Bearer synthetic-webhook-secret"},
+            json=_base_email_payload(
+                message_id="<flight-abc123@airline.example.com>",
+                from_address="flight@airline.example.com",
+                subject="Booking ABC123 Itinerary",
+                text_body="Flight ABC123 departs 20:05 on 2026-12-10 and arrives 05:05 next day.",
+            ),
+        )
+    assert response.status_code == 201
+    commitment = response.json()["commitment"]
+    assert commitment["target_date"] == "2026-12-10"
+    assert commitment["start_minute"] == 1205
+    assert commitment["end_minute"] == 1440
+    assert commitment["all_day"] is False
+
+
+@pytest.mark.parametrize(
+    ("start_minute", "end_minute", "expected_bounds"),
+    [
+        (1205, 305, (1205, 1440)),
+        (1205, 1745, (1205, 1440)),
+        (1205, None, (1205, 1265)),
+        (1410, None, (1410, 1440)),
+        (1205, 1205, (1205, 1265)),
+        (1410, 1410, (1410, 1440)),
+        (570, 630, (570, 630)),
+    ],
+)
+def test_parse_extractor_json_resolves_overnight_and_missing_end_bounds(
+    start_minute: int,
+    end_minute: int | None,
+    expected_bounds: tuple[int, int],
+) -> None:
+    raw_payload = json.dumps(
+        {
+            "schedulable": True,
+            "title": "Booking ABC123",
+            "target_date": "2026-12-10",
+            "start_minute": start_minute,
+            "end_minute": end_minute,
+            "all_day": False,
+            "notes": None,
+        }
+    )
+    event = _parse_extractor_json(raw_payload, "Fallback Subject")
+    assert event is not None
+    assert (event.start_minute, event.end_minute) == expected_bounds
+    assert event.all_day is False
+
+
+def test_parse_extractor_json_allows_all_day_with_null_minutes() -> None:
+    raw_payload = json.dumps(
+        {
+            "schedulable": True,
+            "title": "Multi-day Trip ABC123",
+            "target_date": "2026-12-10",
+            "start_minute": None,
+            "end_minute": None,
+            "all_day": True,
+            "notes": "Alex Tan itinerary",
+        }
+    )
+    event = _parse_extractor_json(raw_payload, "Fallback Subject")
+    assert event is not None
+    assert event.all_day is True
+    assert event.start_minute is None
+    assert event.end_minute is None
+
+
+@pytest.mark.parametrize(
+    ("start_minute", "end_minute"),
+    [
+        (-1, 60),
+        (1440, 1445),
+        (True, 60),
+        (600, False),
+        (600, -10),
+        (None, 600),
+    ],
+)
+def test_parse_extractor_json_rejects_invalid_minutes_with_diagnostics(
+    start_minute: object,
+    end_minute: object,
+) -> None:
+    raw_payload = json.dumps(
+        {
+            "schedulable": True,
+            "title": "Invalid Event",
+            "target_date": "2026-12-10",
+            "start_minute": start_minute,
+            "end_minute": end_minute,
+            "all_day": False,
+            "notes": None,
+        }
+    )
+    with pytest.raises(
+        ScheduleExtractionUpstreamError,
+        match=f"start={start_minute!r}, end={end_minute!r}",
+    ):
+        _parse_extractor_json(raw_payload, "Fallback Subject")

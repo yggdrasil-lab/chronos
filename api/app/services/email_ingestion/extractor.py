@@ -22,6 +22,9 @@ _SYSTEM_PROMPT = (
     '"schedulable" (boolean), "title" (string or null), "target_date" ("YYYY-MM-DD" or null), '
     '"start_minute" (integer 0-1439 or null), "end_minute" (integer 1-1440 or null), '
     '"all_day" (boolean), "notes" (string or null). '
+    "For overnight or cross-midnight events such as red-eye flights, set target_date to the "
+    "departure date and clamp end_minute to 1440 (or set all_day: true for multi-day "
+    "itineraries without clear times). "
     "If the email has no clear dated appointment, flight, reservation, or meeting, "
     'set "schedulable": false.'
 )
@@ -76,6 +79,29 @@ def _strip_code_fences(content: str) -> str:
     return cleaned
 
 
+def _resolve_timed_minutes(start_minute: Any, end_minute: Any) -> tuple[int, int]:
+    invalid_msg = (
+        f"Muninn returned invalid start_minute/end_minute: "
+        f"start={start_minute!r}, end={end_minute!r}."
+    )
+    if (
+        isinstance(start_minute, bool)
+        or not isinstance(start_minute, int)
+        or start_minute < 0
+        or start_minute >= MINUTES_PER_DAY
+    ):
+        raise ScheduleExtractionUpstreamError(invalid_msg)
+    if end_minute is None:
+        return start_minute, min(MINUTES_PER_DAY, start_minute + 60)
+    if isinstance(end_minute, bool) or not isinstance(end_minute, int) or end_minute < 0:
+        raise ScheduleExtractionUpstreamError(invalid_msg)
+    if end_minute < start_minute or end_minute > MINUTES_PER_DAY:
+        return start_minute, MINUTES_PER_DAY
+    if end_minute == start_minute:
+        return start_minute, min(MINUTES_PER_DAY, start_minute + 60)
+    return start_minute, end_minute
+
+
 def _parse_extractor_json(
     raw_content: str, fallback_subject: str
 ) -> ExtractedScheduleEvent | None:
@@ -106,18 +132,7 @@ def _parse_extractor_json(
             notes=notes,
         )
 
-    start_minute = parsed.get("start_minute")
-    end_minute = parsed.get("end_minute")
-    if (
-        isinstance(start_minute, bool)
-        or isinstance(end_minute, bool)
-        or not isinstance(start_minute, int)
-        or not isinstance(end_minute, int)
-        or start_minute < 0
-        or end_minute > MINUTES_PER_DAY
-        or start_minute >= end_minute
-    ):
-        raise ScheduleExtractionUpstreamError("Muninn returned invalid start_minute/end_minute.")
+    start_minute, end_minute = _resolve_timed_minutes(parsed.get("start_minute"), parsed.get("end_minute"))
     return ExtractedScheduleEvent(
         title=raw_title[:200],
         target_date=target_date,
