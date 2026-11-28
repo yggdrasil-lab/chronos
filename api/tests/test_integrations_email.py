@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import Settings
 from app.db.session import Base, get_db
 from app.domain.models import Commitment, CommitmentSource, NudgeMode
 from app.main import app
@@ -355,3 +356,47 @@ def test_email_ingestion_handles_concurrent_integrity_error_as_duplicate(
     )
     assert result.status == "duplicate"
     assert result.consumer_ref == f"commitment:{seeded.id}"
+
+
+def test_muninn_schedule_extractor_defaults_to_60s_timeout() -> None:
+    adapter = MuninnScheduleExtractorAdapter(
+        api_base="http://muninn:4000/v1",
+        api_key="synthetic-muninn-key",
+    )
+    assert adapter._timeout_seconds == 60.0
+
+
+def test_settings_muninn_timeout_seconds_default_env_and_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CHRONOS_MUNINN_TIMEOUT_SECONDS", raising=False)
+    default_settings = Settings()
+    assert default_settings.muninn_timeout_seconds == 60.0
+
+    monkeypatch.setenv("CHRONOS_MUNINN_TIMEOUT_SECONDS", "90.5")
+    env_settings = Settings()
+    assert env_settings.muninn_timeout_seconds == 90.5
+
+    for invalid_value in ("0", "-5"):
+        monkeypatch.setenv("CHRONOS_MUNINN_TIMEOUT_SECONDS", invalid_value)
+        with pytest.raises(ValueError, match="CHRONOS_MUNINN_TIMEOUT_SECONDS must be > 0"):
+            Settings()
+
+
+def test_get_schedule_extractor_passes_muninn_timeout_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(deps.settings, "muninn_api_base", "http://muninn:4000/v1")
+    monkeypatch.setattr(deps.settings, "muninn_api_key", "synthetic-muninn-key")
+    monkeypatch.setattr(deps.settings, "muninn_timeout_seconds", 75.0)
+    configured = deps.get_schedule_extractor()
+    assert isinstance(configured, MuninnScheduleExtractorAdapter)
+    assert configured._timeout_seconds == 75.0
+
+    monkeypatch.setattr(deps.settings, "environment", "production")
+    monkeypatch.setattr(deps.settings, "muninn_api_base", "")
+    monkeypatch.setattr(deps.settings, "muninn_api_key", "")
+    monkeypatch.setattr(deps.settings, "muninn_timeout_seconds", 45.0)
+    fallback = deps.get_schedule_extractor()
+    assert isinstance(fallback, MuninnScheduleExtractorAdapter)
+    assert fallback._timeout_seconds == 45.0

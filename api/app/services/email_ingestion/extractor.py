@@ -138,7 +138,7 @@ class MuninnScheduleExtractorAdapter:
         api_key: str,
         model: str = "app-synthesize",
         timezone_name: str = "Pacific/Auckland",
-        timeout_seconds: float = 15.0,
+        timeout_seconds: float = 60.0,
         client: httpx.Client | None = None,
     ) -> None:
         self._api_base = api_base.strip().rstrip("/")

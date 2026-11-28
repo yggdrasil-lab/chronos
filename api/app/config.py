@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     muninn_api_key: str = ""
     muninn_api_key_file: str = ""
     muninn_model: str = "app-synthesize"
+    muninn_timeout_seconds: float = 60.0
     ics_token: str = ""
     ics_token_file: str = ""
     mcp_token: str = ""
@@ -86,6 +87,8 @@ class Settings(BaseSettings):
             raise ValueError("CHRONOS_PUSH_POLL_INTERVAL_SECONDS must be > 0.")
         if self.peer_timeout_seconds <= 0:
             raise ValueError("CHRONOS_PEER_TIMEOUT_SECONDS must be > 0.")
+        if self.muninn_timeout_seconds <= 0:
+            raise ValueError("CHRONOS_MUNINN_TIMEOUT_SECONDS must be > 0.")
         if self.environment.strip().lower() == "production":
             self._validate_production_requirements()
 
